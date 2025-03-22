@@ -427,7 +427,7 @@ export default class LocalImagesPlugin extends Plugin {
       const fItems = evt.clipboardData.files
       const tItems = evt.clipboardData.items
  
-      if (fItems.length != 0) { return }
+      // Removed early return to allow processing of pasted images
       
       for (const key in tItems) {
 

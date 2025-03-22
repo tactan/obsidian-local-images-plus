@@ -9,6 +9,7 @@ import moment from 'moment';
  * @param counter - A counter value for sequential numbering
  * @param width - Optional width of the image
  * @param height - Optional height of the image
+ * @param targetExtension - Optional extension to override the original (fixes double extension issues when converting formats)
  * @returns The new filename based on the rule
  */
 export function renameImage(
@@ -17,11 +18,12 @@ export function renameImage(
     noteName: string, 
     counter: number, 
     width?: number, 
-    height?: number
+    height?: number,
+    targetExtension?: string
 ): string {
-    // Extract the file extension from the original name
+    // Extract the file extension from the original name or use the target extension if provided
     const extensionMatch = originalName.match(/\.([^.]+)$/);
-    const extension = extensionMatch ? extensionMatch[0] : '';
+    const extension = targetExtension ? `.${targetExtension}` : (extensionMatch ? extensionMatch[0] : '');
     
     // Remove the extension from the rule if it exists
     let baseRule = rule;

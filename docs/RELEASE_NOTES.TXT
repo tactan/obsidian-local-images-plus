@@ -1,3 +1,7 @@
+0.17.0-beta.2
+Fix: Revised pasted image processing to properly support WebP conversion when 'Convert Images to WebP (Pasted Images)' is enabled.
+Improvements: Enhancements in image processing logic and error handling.
+
 0.17.0-beta.1
 Add: WebP Conversion for both web images and pasted images, with quality setting (30–100) and support for JPEG, PNG (and later HEIC/TIF if feasible).
 Add: Customizable Image Renaming functionality using user-defined templates that support variables like {date:FORMAT}, {time:FORMAT}, {notename}, {counter:00X}, {width}, and {height}.

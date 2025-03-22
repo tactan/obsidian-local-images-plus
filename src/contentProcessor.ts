@@ -7,6 +7,8 @@ import {
   Plugin
 } from "obsidian";
 
+import { renameImage } from "./image-renamer";
+
 
 import {
   isUrl,
@@ -40,6 +42,16 @@ export function imageTagProcessor(app: Plugin,
                                  ) {
                                   
   const unique = Math.random().toString(16).slice(2,);
+  const noteId = noteFile.path;
+  
+  // Initialize counter for this note if it doesn't exist
+  if (!app.imageCounters) {
+    app.imageCounters = new Map();
+  }
+  
+  if (!app.imageCounters.has(noteId)) {
+    app.imageCounters.set(noteId, 0);
+  }
 
   async function processImageTag(match: string,
                                  anchor: string,
@@ -47,8 +59,11 @@ export function imageTagProcessor(app: Plugin,
                                  caption: string,
                                  imgsize: string) {
 
-
-   logError("processImageTag: "+match) 
+    // Increment counter for this note
+    app.imageCounters.set(noteId, app.imageCounters.get(noteId) + 1);
+    const counter = app.imageCounters.get(noteId);
+    
+    logError("processImageTag: "+match+" (counter: "+counter+")") 
     if (!isUrl(link)) {
       return match;
     }
@@ -122,11 +137,12 @@ export function imageTagProcessor(app: Plugin,
       logError(fileData)
     }
     
-    // Check if WebP conversion for web images is enabled
-    // Only convert if the image is from a web URL (not file:// or data:)
-    if (settings.convertWebpForWebImages && 
+    // Check if WebP conversion for web images or pasted images is enabled
+    if ((settings.convertWebpForWebImages && 
         protocol !== "file:" && 
-        protocol !== "data:") {
+        protocol !== "data:") ||
+        (settings.convertWebpForPastedImages && 
+        protocol === "file:")) {
       
       // Define supported mime types for WebP conversion
       const supportedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/bmp'];
@@ -158,7 +174,9 @@ export function imageTagProcessor(app: Plugin,
             mediaDir,
             link,
             fileData,
-            settings
+            settings,
+            noteFile.basename,
+            counter // Using the dynamic counter from imageCounters map
           );
           return {fileName, needWrite};
     });
@@ -352,21 +370,24 @@ async function chooseFileName(
   dir: string,
   link: string,
   contentData: ArrayBuffer,
-  settings: ISettings
+  settings: ISettings,
+  noteName?: string,
+  counter?: number
 ): Promise<{ fileName: string; needWrite: boolean }> {
   const parsedUrl = new URL(link);
   const ignoredExt = settings.ignoredExt.split("|");
   let fileExt = await getFileExt(contentData, parsedUrl.pathname);
   
-  // If we're in the process of converting to WebP and the URL has a different extension,
-  // we need to check if the file extension should be overridden
+  // Determine if we need to use a target extension (for WebP conversion)
+  let targetExt: string | undefined = undefined;
   const protocol = link.slice(0,5);
-  if (settings.convertWebpForWebImages && 
-      protocol !== "file:" && 
-      protocol !== "data:" && 
-      fileExt === "webp") {
-    // We've already converted to WebP, so use that extension
-    logError("Using WebP extension for converted image", false);
+  
+  // If the file has been converted to WebP, use WebP as the target extension
+  if (fileExt === "webp" && 
+      ((settings.convertWebpForWebImages && protocol !== "file:" && protocol !== "data:") ||
+       (settings.convertWebpForPastedImages && protocol === "file:"))) {
+    targetExt = "webp";
+    logError("Using WebP as target extension for converted image", false);
   } else {
     logError("file: "+link+" content: "+contentData+" file ext: "+fileExt,false);
   }
@@ -385,11 +406,26 @@ async function chooseFileName(
 
  
   
-  const baseName =  md5Sig(contentData);
-
   let needWrite = true;
   let fileName = "";
-  const suggestedName = pathJoin([dir, cleanFileName(`${baseName}`+`.${fileExt}`)]);
+  let suggestedName = "";
+  
+  // Use custom renaming rule if provided and MD5 is not required
+  if (settings.imageRenameRule && !settings.useMD5ForNewAtt) {
+    const newName = renameImage(path.basename(link), settings.imageRenameRule, noteName, counter, undefined, undefined, targetExt);
+    // If targetExt is defined, the extension is already included in newName
+    if (targetExt) {
+      suggestedName = pathJoin([dir, cleanFileName(newName)]);
+    } else {
+      suggestedName = pathJoin([dir, cleanFileName(`${newName}.${fileExt}`)]);
+    }
+  } else {
+    // Fallback to MD5-based naming
+    const baseName = md5Sig(contentData);
+    // Use targetExt if available, otherwise use the original fileExt
+    const extensionToUse = targetExt || fileExt;
+    suggestedName = pathJoin([dir, cleanFileName(`${baseName}.${extensionToUse}`)]);
+  }
     if (await adapter.exists(suggestedName, false)) {
       const fileData = await adapter.readBinary(suggestedName);
             const existing_file_md5 = md5Sig(fileData);
@@ -398,7 +434,9 @@ async function chooseFileName(
               needWrite = false;
             }
             else{
-              fileName =  pathJoin([dir, cleanFileName( Math.random().toString(9).slice(2,) +`.${fileExt}`)]);
+              // Use targetExt if available, otherwise use the original fileExt
+              const extensionToUse = targetExt || fileExt;
+              fileName = pathJoin([dir, cleanFileName(Math.random().toString(9).slice(2,) +`.${extensionToUse}`)]);
             }
 
     } else {
