@@ -41,6 +41,7 @@ import {
 
 } from "./config"
 
+import { renameImage } from "./image-renamer"
 import { UniqueQueue } from "./uniqueQueue"
 import path from "path"
 import { ModalW1 } from "./modal"
@@ -62,6 +63,7 @@ export default class LocalImagesPlugin extends Plugin {
   noteModified: Array<TFile> = []
   newfMoveReq: boolean = true
   newfCreatedByDownloader: Array<string> = []
+  imageCounters: Map<string, number> = new Map() // Track image counters per note
 
 
 
@@ -311,8 +313,10 @@ export default class LocalImagesPlugin extends Plugin {
 
   private async processPage(file: TFile, defaultdir: boolean = false): Promise<any> {
     
- 
     if (file == null ) {return null}
+
+    // Reset counter for this note when starting to process it
+    this.imageCounters.set(file.path, 0);
 
     const content = await this.app.vault.cachedRead(file)
     if (content.length == 0) {return null}
@@ -866,8 +870,31 @@ export default class LocalImagesPlugin extends Plugin {
               }
 
 
-              let newpath = pathJoin([mdir, cFileName(path.basename(el.link))])
-              let newlink: Array<string> = await getRDir(note, this.settings, newpath)
+              // Get or initialize counter for this note
+              const noteId = note.path;
+              if (!this.imageCounters.has(noteId)) {
+                this.imageCounters.set(noteId, 1);
+              } else {
+                this.imageCounters.set(noteId, this.imageCounters.get(noteId) + 1);
+              }
+              const counter = this.imageCounters.get(noteId);
+              
+              // Get original filename without extension
+              const originalName = path.basename(el.link);
+              const extensionMatch = originalName.match(/\.([^.]+)$/);
+              const extension = extensionMatch ? extensionMatch[0] : '';
+              const nameWithoutExt = extensionMatch ? originalName.slice(0, originalName.lastIndexOf('.')) : originalName;
+              
+              // Rename the image using the renameImage function
+              const newName = renameImage(
+                originalName,
+                this.settings.imageRenameRule,
+                note.basename,
+                counter
+              );
+              
+              let newpath = pathJoin([mdir, newName]);
+              let newlink: Array<string> = await getRDir(note, this.settings, newpath);
 
               logError(el.link)
 
@@ -895,7 +922,14 @@ export default class LocalImagesPlugin extends Plugin {
                   if (this.settings.useMD5ForNewAtt) {
                     newpath = pathJoin([mdir, newMD5 + ".jpeg"])
                   } else {
-                    newpath = pathJoin([mdir, cFileName(path.parse(el.link)?.name + ".jpeg")])
+                    // Use renameImage for consistent naming
+                    const newName = renameImage(
+                      path.parse(el.link)?.name + ".jpeg",
+                      this.settings.imageRenameRule,
+                      note.basename,
+                      this.imageCounters.get(note.path)
+                    );
+                    newpath = pathJoin([mdir, newName])
                   }
                   newlink = await getRDir(note, this.settings, newpath)
                 }
@@ -905,7 +939,14 @@ export default class LocalImagesPlugin extends Plugin {
                 newlink = await getRDir(note, this.settings, newpath)
 
               } else if (!this.settings.useMD5ForNewAtt) {
-                newpath = pathJoin([mdir, cFileName(path.basename(el.link))])
+                // Use renameImage for consistent naming
+                const newName = renameImage(
+                  path.basename(el.link),
+                  this.settings.imageRenameRule,
+                  note.basename,
+                  this.imageCounters.get(note.path)
+                );
+                newpath = pathJoin([mdir, newName])
                 newlink = await getRDir(note, this.settings, newpath)
               }
 
@@ -932,7 +973,15 @@ export default class LocalImagesPlugin extends Plugin {
                   logError("Renaming existing: " + oldpath)
                   let inc = 1
                   while (await this.app.vault.adapter.exists(newpath)) {
-                    newpath = pathJoin([mdir, `(${inc}) ` + cFileName(path.basename(el.link))])
+                    // Create a unique name by adding an incrementing number
+                    const originalName = path.basename(el.link);
+                    const newName = renameImage(
+                      `(${inc}) ` + originalName,
+                      this.settings.imageRenameRule,
+                      note.basename,
+                      this.imageCounters.get(note.path)
+                    );
+                    newpath = pathJoin([mdir, newName]);
                     inc++
                   }
 

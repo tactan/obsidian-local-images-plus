@@ -17,10 +17,12 @@ Obsidian Local Images Plus is a plugin for [Obsidian](https://obsidian.md/)
 - Downloading media files from copied/pasted content of web pages
 - Localizing media files from copied/pasted content of word / Open Office documents
 - Downloading any filetypes from web
-- Saving attachments next to note in folder named after  note
+- Saving attachments next to note in folder named after note
 - Downloading files embedded in markdown tags from web to vault 
 - Saving base64 embedded images to vault
 - Converting PNG images to JPEG images with various quality
+- Converting images to WebP format for better compression
+- Custom image renaming with flexible templates
 - Attachments de-dulication by using MD5 hashing algorithm
 - Removing orphaned attachments from vault
 
@@ -58,6 +60,33 @@ This plugin has known compatibility issues with the following plugins:
 Just copy any web content, Word/Open Office content and paste it into your regular note or a note in canvas.
 
 This plugin also handles all attachments (screenshots/drag-and-drop for files/audio records).
+
+### WebP Conversion
+
+The plugin can automatically convert images to WebP format, which offers better compression than JPEG or PNG while maintaining similar quality. This helps reduce the size of your vault.
+
+You can enable WebP conversion for:
+- Web images (images downloaded from the web)
+- Pasted images (screenshots, clipboard images)
+
+The WebP quality setting (30-100) lets you balance between file size and image quality. Higher values mean better quality but larger files.
+
+### Image Renaming
+
+You can customize how your images are named using the Image Rename Rule setting. The plugin supports various placeholders that are replaced when saving an image:
+
+- `{notename}` - Name of the current note
+- `{date:FORMAT}` - Current date (FORMAT follows [moment.js format](https://momentjs.com/docs/#/displaying/format/))
+- `{time:FORMAT}` - Current time (FORMAT follows moment.js format)
+- `{counter:000}` - Sequential counter (zeros define padding, e.g., 001, 002...)
+- `{width}` - Image width in pixels
+- `{height}` - Image height in pixels
+
+Examples:
+- `{notename}-{counter:001}` → "My Note-001.png"
+- `{date:YYYY-MM-DD}-{counter:00}` → "2025-03-22-01.png"
+- `image-{width}x{height}` → "image-800x600.png"
+- `{notename}-{date:YYYYMMDD}-{time:HHmm}` → "My Note-20250322-1430.png"
 
 
 
@@ -111,9 +140,21 @@ and
 The first one searches orphans in the folder next to the active note, while the second one searches all unused attachments for all your notes. (this requires you to set some root subfolder in Obsidian settings)
 
 
-All attachment names are generated according to MD5, therefore they are pretty unique within the vault.        
+All attachment names are generated according to MD5 by default, therefore they are pretty unique within the vault. If you enable the image renaming feature, the names will follow your custom template instead.
 
 This means you can place an attachment file anywhere within your vault, replace the absolute path in a tag with the file name and Obsidian will still show it in your note.
+
+## Settings
+
+### WebP Conversion Settings
+
+- **Convert Images to WebP (Web Images)**: When enabled, images downloaded from the web will be converted to WebP format.
+- **Convert Images to WebP (Pasted Images)**: When enabled, images pasted from clipboard will be converted to WebP format.
+- **WebP Quality**: Controls the quality of WebP conversion (30-100). Higher values mean better quality but larger files. Default is 80.
+
+### Image Renaming Settings
+
+- **Image Rename Rule**: Template for renaming images. Default is `{notename}-{counter:001}`.
  
 
 

@@ -28,6 +28,7 @@ import{
   SUPPORTED_OS
 } from "./config";
 
+import { convertToWebp } from "./webp-converter";
 
 import AsyncLock from "async-lock";
 import moment from "moment";
@@ -119,6 +120,38 @@ export function imageTagProcessor(app: Plugin,
 
       logError("arbuf: ")
       logError(fileData)
+    }
+    
+    // Check if WebP conversion for web images is enabled
+    // Only convert if the image is from a web URL (not file:// or data:)
+    if (settings.convertWebpForWebImages && 
+        protocol !== "file:" && 
+        protocol !== "data:") {
+      
+      // Define supported mime types for WebP conversion
+      const supportedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/bmp'];
+      
+      // Determine mime type based on file extension
+      let mimeType = 'image/jpeg'; // Default
+      if (fileExt === 'png') mimeType = 'image/png';
+      else if (fileExt === 'gif') mimeType = 'image/gif';
+      else if (fileExt === 'bmp') mimeType = 'image/bmp';
+      else if (fileExt === 'jpg' || fileExt === 'jpeg') mimeType = 'image/jpeg';
+      
+      // Only convert supported mime types
+      if (supportedMimeTypes.includes(mimeType)) {
+        try {
+          logError("Converting to WebP: " + mimeType, false);
+          // Convert to WebP using the imported function
+          fileData = await convertToWebp(fileData, mimeType, settings.webpQuality);
+          // Update file extension to webp
+          fileExt = 'webp';
+          logError("WebP conversion successful", false);
+        } catch (error) {
+          logError("WebP conversion failed: " + error, false);
+          // Continue with original file if conversion fails
+        }
+      }
     }
           const { fileName, needWrite } = await chooseFileName(
             app.app.vault.adapter,
@@ -324,7 +357,19 @@ async function chooseFileName(
   const parsedUrl = new URL(link);
   const ignoredExt = settings.ignoredExt.split("|");
   let fileExt = await getFileExt(contentData, parsedUrl.pathname);
-  logError("file: "+link+" content: "+contentData+" file ext: "+fileExt,false);
+  
+  // If we're in the process of converting to WebP and the URL has a different extension,
+  // we need to check if the file extension should be overridden
+  const protocol = link.slice(0,5);
+  if (settings.convertWebpForWebImages && 
+      protocol !== "file:" && 
+      protocol !== "data:" && 
+      fileExt === "webp") {
+    // We've already converted to WebP, so use that extension
+    logError("Using WebP extension for converted image", false);
+  } else {
+    logError("file: "+link+" content: "+contentData+" file ext: "+fileExt,false);
+  }
   
 
  

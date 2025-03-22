@@ -85,7 +85,11 @@ export interface ISettings {
   PngToJpegLocal: boolean;
   JpegQuality: number;
   DoNotCreateObsFolder: boolean;
-  DateFormat: string
+  DateFormat: string,
+  convertWebpForWebImages: boolean,
+  convertWebpForPastedImages: boolean,
+  webpQuality: number,
+  imageRenameRule: string
 }
 
 export const DEFAULT_SETTINGS: ISettings = {
@@ -113,5 +117,9 @@ export const DEFAULT_SETTINGS: ISettings = {
   PngToJpegLocal: true,
   JpegQuality: 80,
   DoNotCreateObsFolder: false,
-  DateFormat: "YYYY MM DD"
+  DateFormat: "YYYY MM DD",
+  convertWebpForWebImages: false,
+  convertWebpForPastedImages: false,
+  webpQuality: 80,
+  imageRenameRule: '{notename}-{counter:001}'
 };

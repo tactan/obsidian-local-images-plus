@@ -489,6 +489,78 @@ export default class SettingTab extends PluginSettingTab {
 
             )
 
+            containerEl.createEl("h3", { text: "WebP Conversion" })
+
+            new Setting(containerEl)
+            .setName("Convert Images to WebP (Web Images)")
+            .setDesc("Convert all downloaded images to WebP format. This can significantly reduce file size while maintaining quality.")
+            .addToggle((toggle) =>
+                toggle
+                    .setValue(this.plugin.settings.convertWebpForWebImages)
+                    .onChange(async (value) => {
+                        this.plugin.settings.convertWebpForWebImages = value
+                        await this.plugin.saveSettings()
+                    })
+            )
+
+            new Setting(containerEl)
+            .setName("Convert Images to WebP (Pasted Images)")
+            .setDesc("Convert all pasted images to WebP format. This can significantly reduce file size while maintaining quality.")
+            .addToggle((toggle) =>
+                toggle
+                    .setValue(this.plugin.settings.convertWebpForPastedImages)
+                    .onChange(async (value) => {
+                        this.plugin.settings.convertWebpForPastedImages = value
+                        await this.plugin.saveSettings()
+                    })
+            )
+
+            new Setting(containerEl)
+            .setName("WebP Quality")
+            .setDesc("WebP quality selection (30 to 100). Lower values result in smaller file sizes but may reduce image quality.")
+            .addText((text) =>
+                text
+                    .setValue(String(this.plugin.settings.webpQuality))
+                    .onChange(async (value: string) => {
+                        let numberValue = Number(value)
+                        if (
+                            isNaN(numberValue) ||
+                            !Number.isInteger(numberValue) ||
+                            numberValue < 30 ||
+                            numberValue > 100
+                        ) {
+                            displayError(
+                                "The value should be a positive integer number between 30 and 100!"
+                            )
+                            return
+                        }
+                        this.plugin.settings.webpQuality = numberValue
+                        await this.plugin.saveSettings()
+                    })
+            )
+
+            containerEl.createEl("h3", { text: "Image Renaming" })
+
+            new Setting(containerEl)
+            .setName("Image Rename Rule")
+            .setDesc("Define how images should be renamed. You can use the following variables:\n" +
+                    "{date:FORMAT} - Current date with specified format\n" +
+                    "{time:FORMAT} - Current time with specified format\n" +
+                    "{notename} - Name of the current note\n" +
+                    "{counter:00X} - Sequential counter with leading zeros\n" +
+                    "{width} - Image width\n" +
+                    "{height} - Image height")
+            .addTextArea((text) => {
+                text
+                    .setValue(this.plugin.settings.imageRenameRule)
+                    .onChange(async (value) => {
+                        this.plugin.settings.imageRenameRule = value
+                        await this.plugin.saveSettings()
+                    });
+                text.inputEl.rows = 3;
+                text.inputEl.cols = 50;
+                return text;
+            })
 
             containerEl.createEl("h3", { text: "Troubleshooting" })
             new Setting(containerEl)
