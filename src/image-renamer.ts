@@ -35,12 +35,50 @@ export function renameImage(
     
     // Replace {date:FORMAT} placeholders
     result = result.replace(/{date:([^}]+)}/g, (match, format) => {
-        return moment().format(format);
+        try {
+            // Use moment to format the current date using the provided format string
+            // Format is passed directly to moment without modification to preserve special characters
+            const formattedDate = moment().format(format);
+            
+            // Check if moment returned 'Invalid date' which can happen with certain format strings
+            if (formattedDate === 'Invalid date') {
+                throw new Error('Moment returned Invalid date');
+            }
+            
+            return formattedDate;
+        } catch (error: any) {
+            // Enhanced error logging with detailed message to help diagnose format issues
+            console.error(`Error formatting date with format '${format}': ${error.message || error}`);
+            console.error('Using fallback date format YYYYMMDD instead');
+            
+            // Fallback to a safe format that doesn't use special characters
+            // YYYYMMDD is used as it's filesystem-safe across platforms
+            return moment().format('YYYYMMDD');
+        }
     });
     
     // Replace {time:FORMAT} placeholders
     result = result.replace(/{time:([^}]+)}/g, (match, format) => {
-        return moment().format(format);
+        try {
+            // Use moment to format the current time using the provided format string
+            // Format string is passed directly to preserve any special characters
+            const formattedTime = moment().format(format);
+            
+            // Validate the result to catch silent failures
+            if (formattedTime === 'Invalid date') {
+                throw new Error('Moment returned Invalid date');
+            }
+            
+            return formattedTime;
+        } catch (error: any) {
+            // Enhanced error logging with explicit error type and detailed message
+            console.error(`Error formatting time with format '${format}': ${error.message || error}`);
+            console.error('Using fallback time format HHmmss instead');
+            
+            // Fallback to a filesystem-safe format without special characters
+            // HHmmss is used as it's compatible with all operating systems
+            return moment().format('HHmmss');
+        }
     });
     
     // Replace {notename} placeholder
@@ -59,11 +97,16 @@ export function renameImage(
                 console.warn(`Unrecognized counter format '${format}', using default formatting`);
                 return counter.toString();
             }
-        } catch (error) {
-            console.error(`Error formatting counter: ${error}`);
+        } catch (error: any) {
+            // Enhanced error logging with explicit error type and detailed message
+            console.error(`Error formatting counter with format '${format}': ${error.message || error}`);
             return counter.toString();
         }
     });
+    
+    // Note: If you continue to experience issues with date/time formats containing special characters,
+    // consider validating format strings before passing them to moment.js or escaping special characters
+    // by wrapping them in square brackets, e.g., 'YYYY-MM-DD [at] HH:mm:ss'
     
     // Replace {width} placeholder if width is provided
     if (width !== undefined) {
