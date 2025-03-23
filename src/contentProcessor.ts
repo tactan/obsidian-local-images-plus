@@ -175,7 +175,7 @@ export function imageTagProcessor(app: Plugin,
             link,
             fileData,
             settings,
-            noteFile.basename,
+            noteFile.basename, // Pass the original note name without modification to preserve spaces
             counter // Using the dynamic counter from imageCounters map
           );
           return {fileName, needWrite};
@@ -412,6 +412,8 @@ async function chooseFileName(
   
   // Use custom renaming rule if provided and MD5 is not required
   if (settings.imageRenameRule && !settings.useMD5ForNewAtt) {
+    // Pass the original note name without any transformation to preserve spaces
+    // This ensures consistency between online and pasted images
     const newName = renameImage(path.basename(link), settings.imageRenameRule, noteName, counter, undefined, undefined, targetExt);
     // If targetExt is defined, the extension is already included in newName
     if (targetExt) {

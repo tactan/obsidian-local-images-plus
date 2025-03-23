@@ -44,6 +44,8 @@ export function renameImage(
     });
     
     // Replace {notename} placeholder
+    // Note: noteName is used as-is without modification, preserving any spaces
+    // This ensures consistency between online and pasted images
     result = result.replace(/{notename}/g, noteName);
     
     // Replace {counter:FORMAT} placeholders

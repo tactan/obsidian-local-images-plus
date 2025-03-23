@@ -336,13 +336,21 @@ export function cFileName(name: string) {
   return cleanedName;
 }
 
+//new filenamify, without forbidden symbols
 export function cleanFileName(name: string) {
-  const cleanedName = filenamify(name).replace(
-    FORBIDDEN_SYMBOLS_FILENAME_PATTERN,
-    "_"
-  );
+  // Rely solely on filenamify for filename cleaning
+  const cleanedName = filenamify(name);
   return cleanedName;
 }
+
+//original filenamify
+//export function cleanFileName(name: string) {
+//  const cleanedName = filenamify(name).replace(
+//    FORBIDDEN_SYMBOLS_FILENAME_PATTERN,
+//    "_"
+//  );
+//  return cleanedName;
+//}
 
 export function pathJoin(parts: Array<string>): string {
   const result = path.join(...parts);
