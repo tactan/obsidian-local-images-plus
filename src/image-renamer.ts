@@ -48,13 +48,19 @@ export function renameImage(
     
     // Replace {counter:FORMAT} placeholders
     result = result.replace(/{counter:([^}]+)}/g, (match, format) => {
-        // Determine padding from format (e.g., "001" means pad to 3 digits)
-        const paddingMatch = format.match(/^(0+)/);
-        if (paddingMatch) {
-            const padding = paddingMatch[0].length;
-            return counter.toString().padStart(padding, '0');
+        try {
+            // Use the length of the format string as the padding length if format consists solely of digits
+            if (/^[0-9]+$/.test(format)) {
+                const padding = format.length;
+                return counter.toString().padStart(padding, '0');
+            } else {
+                console.warn(`Unrecognized counter format '${format}', using default formatting`);
+                return counter.toString();
+            }
+        } catch (error) {
+            console.error(`Error formatting counter: ${error}`);
+            return counter.toString();
         }
-        return counter.toString();
     });
     
     // Replace {width} placeholder if width is provided
