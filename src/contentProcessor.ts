@@ -22,7 +22,8 @@ import {
   base64ToBuff,
   md5Sig,
   getFileExt,
-  blobToJpegArrayBuffer
+  blobToJpegArrayBuffer,
+  getImageDimensions
 } from "./utils";
 
 import{
@@ -116,6 +117,14 @@ export function imageTagProcessor(app: Plugin,
             return null;
          }
 
+        // Obtain image dimensions using the new utility function
+        const dimensions = await getImageDimensions(fileData);
+        let imgWidth, imgHeight;
+        if (dimensions) {
+          imgWidth = dimensions.width;
+          imgHeight = dimensions.height;
+        }
+
         try {
      
 
@@ -176,7 +185,9 @@ export function imageTagProcessor(app: Plugin,
             fileData,
             settings,
             noteFile.basename, // Pass the original note name without modification to preserve spaces
-            counter // Using the dynamic counter from imageCounters map
+            counter, // Using the dynamic counter from imageCounters map
+            imgWidth,
+            imgHeight
           );
           return {fileName, needWrite};
     });
@@ -372,7 +383,9 @@ async function chooseFileName(
   contentData: ArrayBuffer,
   settings: ISettings,
   noteName?: string,
-  counter?: number
+  counter?: number,
+  imgWidth?: number,
+  imgHeight?: number
 ): Promise<{ fileName: string; needWrite: boolean }> {
   const parsedUrl = new URL(link);
   const ignoredExt = settings.ignoredExt.split("|");
@@ -414,7 +427,7 @@ async function chooseFileName(
   if (settings.imageRenameRule && !settings.useMD5ForNewAtt) {
     // Pass the original note name without any transformation to preserve spaces
     // This ensures consistency between online and pasted images
-    const newName = renameImage(path.basename(link), settings.imageRenameRule, noteName, counter, undefined, undefined, targetExt);
+    const newName = renameImage(path.basename(link), settings.imageRenameRule, noteName, counter, imgWidth, imgHeight, targetExt);
     // If targetExt is defined, the extension is already included in newName
     if (targetExt) {
       suggestedName = pathJoin([dir, cleanFileName(newName)]);

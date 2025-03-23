@@ -30,7 +30,8 @@ import {
   pathJoin,
   blobToJpegArrayBuffer,
   getFileExt,
-  readFromDiskB
+  readFromDiskB,
+  getImageDimensions
 } from "./utils"
 
 import {
@@ -485,6 +486,23 @@ export default class LocalImagesPlugin extends Plugin {
           reader.readAsArrayBuffer(file);
         });
         
+        // Get image dimensions from the original data
+        let imgWidth: number | undefined = undefined;
+        let imgHeight: number | undefined = undefined;
+        try {
+          logError(`[${fileId}] Getting image dimensions...`);
+          const dimensions = await getImageDimensions(originalData);
+          if (dimensions) {
+            imgWidth = dimensions.width;
+            imgHeight = dimensions.height;
+            logError(`[${fileId}] Image dimensions: ${imgWidth}x${imgHeight}`);
+          } else {
+            logError(`[${fileId}] Could not determine image dimensions`);
+          }
+        } catch (error) {
+          logError(`[${fileId}] Error getting image dimensions: ${error}`);
+        }
+        
         // Initialize variables for final file data
         let finalData = originalData;
         let finalMimeType = file.type;
@@ -519,8 +537,8 @@ export default class LocalImagesPlugin extends Plugin {
           this.settings.imageRenameRule,
           activeFile.basename,
           counter,
-          undefined,
-          undefined,
+          imgWidth,
+          imgHeight,
           finalExtension
         );
         
@@ -1102,12 +1120,29 @@ export default class LocalImagesPlugin extends Plugin {
               const extension = extensionMatch ? extensionMatch[0] : '';
               const nameWithoutExt = extensionMatch ? originalName.slice(0, originalName.lastIndexOf('.')) : originalName;
               
+              // Get image dimensions if possible
+              let imgWidth: number | undefined = undefined;
+              let imgHeight: number | undefined = undefined;
+              try {
+                const oldBinDataForDimensions = await this.app.vault.adapter.readBinary(oldpath);
+                const dimensions = await getImageDimensions(oldBinDataForDimensions);
+                if (dimensions) {
+                  imgWidth = dimensions.width;
+                  imgHeight = dimensions.height;
+                  logError(`Image dimensions for ${originalName}: ${imgWidth}x${imgHeight}`);
+                }
+              } catch (error) {
+                logError(`Error getting image dimensions for ${originalName}: ${error}`);
+              }
+              
               // Rename the image using the renameImage function
               const newName = renameImage(
                 originalName,
                 this.settings.imageRenameRule,
                 note.basename,
-                counter
+                counter,
+                imgWidth,
+                imgHeight
               );
               
               let newpath = pathJoin([mdir, newName]);
@@ -1144,7 +1179,9 @@ export default class LocalImagesPlugin extends Plugin {
                       path.parse(el.link)?.name + ".jpeg",
                       this.settings.imageRenameRule,
                       note.basename,
-                      counter
+                      counter,
+                      imgWidth,
+                      imgHeight
                     );
                     newpath = pathJoin([mdir, newName])
                   }
@@ -1161,7 +1198,9 @@ export default class LocalImagesPlugin extends Plugin {
                   path.basename(el.link),
                   this.settings.imageRenameRule,
                   note.basename,
-                  counter
+                  counter,
+                  imgWidth,
+                  imgHeight
                 );
                 newpath = pathJoin([mdir, newName])
                 newlink = await getRDir(note, this.settings, newpath)
@@ -1196,7 +1235,9 @@ export default class LocalImagesPlugin extends Plugin {
                       `(${inc}) ` + originalName,
                       this.settings.imageRenameRule,
                       note.basename,
-                      counter
+                      counter,
+                      imgWidth,
+                      imgHeight
                     );
                     newpath = pathJoin([mdir, newName]);
                     inc++

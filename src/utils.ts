@@ -420,4 +420,32 @@ export async function blobToJpegArrayBuffer(blob: Blob, jpegQuality: number): Pr
   });
 }
 
+/**
+ * Gets the dimensions (width and height) of an image from ArrayBuffer data.
+ * @param imageData ArrayBuffer containing image data (can be any supported image format).
+ * @returns A promise resolving to an object with width and height properties, or null if dimensions couldn't be determined.
+ * This function is used to extract dimensions for placeholder replacement in image naming patterns.
+ */
+export async function getImageDimensions(imageData: ArrayBuffer): Promise<{ width: number; height: number } | null> {
+  return new Promise((resolve, reject) => {
+    try {
+      const blob = new Blob([imageData]);
+      const imageUrl = URL.createObjectURL(blob);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(imageUrl);
+        resolve({ width: img.width, height: img.height });
+      };
+      img.onerror = (error) => {
+        URL.revokeObjectURL(imageUrl);
+        console.error('Error getting image dimensions:', error);
+        resolve(null);
+      };
+      img.src = imageUrl;
+    } catch (e) {
+      console.error('Exception in getImageDimensions:', e);
+      resolve(null);
+    }
+  });
+}
  
