@@ -1,5 +1,8 @@
-export const APP_TITLE = "Local Images Plus  0.16.3";
+//export const APP_TITLE = "Local Images Plus  0.16.3";
 
+import manifest from "../manifest.json"; // 导入 manifest.json 文件
+
+export const APP_TITLE = `Local Images Plus  ${manifest.version}`; // 修改为动态读取版本号
 
 
 
