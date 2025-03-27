@@ -562,6 +562,7 @@ export default class LocalImagesPlugin extends Plugin {
 
     // Get the current counter for this note (without resetting it)
     const currentCounter = this.getCounter(file.path);
+    logError(`Processing note: ${file.path} (basename: ${file.basename})`);
     logError(`Current counter for note: ${file.path} is ${currentCounter}`);
 
     const content = await this.app.vault.cachedRead(file)
@@ -569,20 +570,27 @@ export default class LocalImagesPlugin extends Plugin {
     
     logError(`Content length: ${content.length}`);
     logError(`Content preview: ${content.substring(0, 100)}...`);
-    logError(`Testing regex patterns on content...`);
     
-    // Log each regex pattern test result
-    for (const reg_p of MD_SEARCH_PATTERN) {
-      logError(`Pattern ${reg_p.toString()} test result: ${reg_p.test(content)}`);
-    }
-
+    // Define a consolidated regex pattern for markdown image links
+    const CONSOLIDATED_MD_PATTERN = /\!\[(?<anchor>([^\]]*?))\]\((?<link>((http(s){0,1}|(data\:.+?base64\,)|(file\:\/)).+?))\)/gm;
+    
+    // Reset lastIndex to ensure consistent matching
+    CONSOLIDATED_MD_PATTERN.lastIndex = 0;
+    
+    // Log the test result for the consolidated pattern
+    logError(`Consolidated pattern test result: ${CONSOLIDATED_MD_PATTERN.test(content)}`);
+    
+    // Reset lastIndex again after testing
+    CONSOLIDATED_MD_PATTERN.lastIndex = 0;
+    
     const fixedContent = await replaceAsync(
       content,
-      MD_SEARCH_PATTERN,
+      CONSOLIDATED_MD_PATTERN,
       imageTagProcessor(this,
         file,
         this.settings,
-        defaultdir
+        defaultdir,
+        file.path // Pass the file path to ensure file-specific URL deduplication
       )
     )
 
@@ -930,18 +938,18 @@ export default class LocalImagesPlugin extends Plugin {
             
             htmlToMarkdown(evt.clipboardData.getData("text"))
             
+            // Define a consolidated regex pattern for markdown image links
+            const CONSOLIDATED_MD_PATTERN = /\!\[(?<anchor>([^\]]*?))\]\((?<link>((http(s){0,1}|(data\:.+?base64\,)|(file\:\/)).+?))\)/gm;
+            
+            // Reset lastIndex to ensure consistent matching
+            CONSOLIDATED_MD_PATTERN.lastIndex = 0;
+            
+            if (CONSOLIDATED_MD_PATTERN.test(cont)) {
+              logError("content: " + cont)
+              showBalloon("Media links were found, processing...", this.settings.showNotifications)
 
-
-
-            for (const reg_p of MD_SEARCH_PATTERN) {
-              if (reg_p.test(cont)) {
-                logError("content: " + cont)
-                showBalloon("Media links were found, processing...", this.settings.showNotifications)
-
-                this.enqueueActivePage(activeFile)
-                this.setupQueueInterval()
-                break
-              }
+              this.enqueueActivePage(activeFile)
+              this.setupQueueInterval()
             }
           }
           return
@@ -1425,13 +1433,16 @@ export default class LocalImagesPlugin extends Plugin {
         const metaCache = this.app.metadataCache.getFileCache(note)
         let filedata = await this.app.vault.cachedRead(note)
         
-        let pr = false
-        for (const reg_p of MD_SEARCH_PATTERN) {
-          if (reg_p.test(filedata)) {
-            pr = true
-            break
-          }
-        }
+        // Define a consolidated regex pattern for markdown image links
+        const CONSOLIDATED_MD_PATTERN = /\!\[(?<anchor>([^\]]*?))\]\((?<link>((http(s){0,1}|(data\:.+?base64\,)|(file\:\/)).+?))\)/gm;
+        
+        // Reset lastIndex to ensure consistent matching
+        CONSOLIDATED_MD_PATTERN.lastIndex = 0;
+        
+        let pr = CONSOLIDATED_MD_PATTERN.test(filedata);
+        
+        // Reset lastIndex again after testing
+        CONSOLIDATED_MD_PATTERN.lastIndex = 0;
 
         const mdir = await getMDir(this.app, note, this.settings)
         const obsmdir = await getMDir(this.app, note, this.settings, true)

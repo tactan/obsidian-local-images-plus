@@ -96,10 +96,12 @@ export function md5Sig(contentData: ArrayBuffer = undefined) {
 }
 
 
-export async function replaceAsync(str: any, regex: Array<RegExp>, asyncFn: any) {
+export async function replaceAsync(str: any, regex: RegExp | Array<RegExp>, asyncFn: any) {
+  // Ensure regex is treated as an array
+  const regexArr = Array.isArray(regex) ? regex : [regex];
 
   logError("replaceAsync: \r\nstr: " + str + "\r\nregex: ")
-  logError(regex, true);
+  logError(regexArr, true);
 
   let errorflag = false;
   const promises: Promise<any>[] = [];
@@ -111,7 +113,7 @@ export async function replaceAsync(str: any, regex: Array<RegExp>, asyncFn: any)
   let filesArr: Array<string> = [];
   let AttSize = "";
 
-  regex.forEach((element) => {
+  regexArr.forEach((element) => {
     logError("cur regex:  " + element);
     const matches = str.matchAll(element);
 

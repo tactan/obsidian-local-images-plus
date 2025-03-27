@@ -1,6 +1,21 @@
 import { Notice } from 'obsidian';
 
 /**
+ * Set to track URLs that have already been converted to WebP
+ * This prevents duplicate processing of the same image URL
+ */
+const convertedUrls = new Set<string>();
+
+/**
+ * Clears the cache of converted URLs
+ * Call this when starting to process a new file
+ */
+export const clearConvertedUrlsCache = (): void => {
+    convertedUrls.clear();
+    console.log('WebP converter: URL cache cleared');
+};
+
+/**
  * Converts a Blob to an ArrayBuffer
  * @param blob - The Blob to convert
  * @returns Promise resolving to an ArrayBuffer
@@ -30,8 +45,14 @@ const blobToArrayBuffer = async (blob: Blob): Promise<ArrayBuffer> => {
 export const convertToWebp = async (
     imageData: ArrayBuffer, 
     mimeType: string, 
-    quality: number
+    quality: number,
+    sourceUrl?: string
 ): Promise<ArrayBuffer> => {
+    // Check if this URL has already been processed
+    if (sourceUrl && convertedUrls.has(sourceUrl)) {
+        console.log(`WebP conversion skipped: URL already processed: ${sourceUrl}`);
+        return imageData; // Return original data without converting
+    }
     // Validate input parameters
     if (!imageData || imageData.byteLength === 0) {
         throw new Error('Invalid or empty image data provided. Cannot convert to WebP.');
@@ -134,6 +155,13 @@ export const convertToWebp = async (
     - Result size: ${result.byteLength} bytes (${compressionRatio}% of original)
     - ${savings}
     - Conversion method: OffscreenCanvas`);
+            
+            // Add URL to the set of processed URLs if provided
+            if (sourceUrl) {
+                convertedUrls.add(sourceUrl);
+                console.log(`Added to WebP conversion cache: ${sourceUrl}`);
+            }
+            
             return result;
         } else {
             // HTMLCanvasElement uses toBlob
@@ -151,6 +179,13 @@ export const convertToWebp = async (
     - Result size: ${buffer.byteLength} bytes (${compressionRatio}% of original)
     - ${savings}
     - Conversion method: HTMLCanvasElement`);
+                                
+                                // Add URL to the set of processed URLs if provided
+                                if (sourceUrl) {
+                                    convertedUrls.add(sourceUrl);
+                                    console.log(`Added to WebP conversion cache: ${sourceUrl}`);
+                                }
+                                
                                 resolve(buffer);
                             } catch (error) {
                                 reject(error);
