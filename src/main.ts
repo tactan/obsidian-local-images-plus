@@ -1347,11 +1347,24 @@ export default class LocalImagesPlugin extends Plugin {
         const newlink = await getRDir(activeFile, this.settings, finalPath);
         const markdownLink = `![[${newlink[0]}]]`;
         
-        // Insert the link into the editor if possible
+        // Get the editor and try to replace the existing link
         const editor = this.app.workspace.activeEditor?.editor;
         if (editor) {
-          editor.replaceSelection(markdownLink);
-          logError(`Inserted markdown link: ${markdownLink}`);
+          // Construct the original link format
+          const originalFileName = path.basename(file.path);
+          const originalLink = `![[${originalFileName}]]`;
+          
+          // Try to replace the original link with the WebP link
+          const replacementSuccessful = this.replaceImageLinkInEditor(editor, originalLink, markdownLink);
+          
+          if (!replacementSuccessful) {
+            logError(`Could not find original link to replace: ${originalLink}. No new link will be inserted to avoid duplicates.`);
+            // Note: We don't insert a new link to avoid duplicates
+          } else {
+            logError(`Successfully replaced original link with WebP link: ${originalLink} → ${markdownLink}`);
+          }
+        } else {
+          logError(`No active editor found to replace image link`);
         }
         
         // Delete the original file
