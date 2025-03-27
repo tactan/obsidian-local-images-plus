@@ -9,6 +9,10 @@ import {
 
 import { renameImage } from "./image-renamer";
 
+// Regular expression to match markdown image links with expanded image formats
+// Includes: jpg, jpeg, png, gif, webp, bmp, avif, svg, tiff, ico
+export const MD_SEARCH_PATTERN = /!\[([^\]]*)\]\(([^)]+\.(jpe?g|png|gif|webp|bmp|avif|svg|tiff?|ico)(?:\?[^)]*)?)\)/gi;
+
 
 import {
   isUrl,
@@ -53,6 +57,11 @@ export function imageTagProcessor(app: Plugin,
   if (!app.imageCounters.has(noteId)) {
     app.imageCounters.set(noteId, 0);
   }
+  
+  // Initialize processed files tracking if it doesn't exist
+  if (!app.processedFiles) {
+    app.processedFiles = new Set();
+  }
 
   async function processImageTag(match: string,
                                  anchor: string,
@@ -60,12 +69,26 @@ export function imageTagProcessor(app: Plugin,
                                  caption: string,
                                  imgsize: string) {
 
-    // Increment counter for this note
-    app.imageCounters.set(noteId, app.imageCounters.get(noteId) + 1);
-    const counter = app.imageCounters.get(noteId);
+    // Get a fresh counter for this note using getNextCounter if available, otherwise fallback
+    const counter = app.getNextCounter ? 
+      await app.getNextCounter(noteId) : 
+      (app.imageCounters.set(noteId, app.imageCounters.get(noteId) + 1), app.imageCounters.get(noteId));
     
-    logError("processImageTag: "+match+" (counter: "+counter+")") 
-    if (!isUrl(link)) {
+    // Enhanced logging
+    logError("processImageTag: "+match+" (counter: "+counter+")");
+    logError("Anchor: "+anchor+", Link: "+link+", Caption: "+caption+", Size: "+imgsize);
+    
+    // Verify link starts with http or data
+    if (!isUrl(link) || !(link.startsWith('http') || link.startsWith('data:'))) {
+      logError("Link is not a valid URL or doesn't start with http/data: " + link, false);
+      return match;
+    }
+    
+    // Check if this file has already been processed by handlePastedFiles
+    // This prevents double processing of the same file
+    const fileSignature = md5Sig(link + noteId);
+    if (app.processedFiles.has(fileSignature)) {
+      logError("Skipping already processed file: " + link, false);
       return match;
     }
 
@@ -97,12 +120,20 @@ export function imageTagProcessor(app: Plugin,
                    fileData = await readFromDisk(decodeURI(fpath));}
         }
         else{
-            //Try to download several times
+            //Try to download several times with enhanced logging
             let trycount  = 0;
             while (trycount < settings.tryCount){ 
-                fileData = await downloadImage(link);
-                logError("\r\n\nDownloading (try): "+trycount+"\r\n\n");
-                if (fileData !== null){break;}
+                logError("\r\n\nDownloading (try): "+trycount+" for URL: "+link+"\r\n\n");
+                // Force download using fetch
+                try {
+                    fileData = await downloadImage(link);
+                    if (fileData !== null) {
+                        logError("Download successful on attempt: " + trycount, false);
+                        break;
+                    }
+                } catch (error) {
+                    logError("Download attempt " + trycount + " failed: " + error, false);
+                }
                 trycount++;
             }
         }
@@ -146,12 +177,12 @@ export function imageTagProcessor(app: Plugin,
       logError(fileData)
     }
     
-    // Check if WebP conversion for web images or pasted images is enabled
-    if ((settings.convertWebpForWebImages && 
-        protocol !== "file:" && 
-        protocol !== "data:") ||
-        (settings.convertWebpForPastedImages && 
-        protocol === "file:")) {
+    // Check if WebP conversion should be applied
+    // Always convert if convertWebpForPastedImages is enabled, regardless of protocol
+    if (settings.convertWebpForPastedImages || 
+        (settings.convertWebpForWebImages && 
+         protocol !== "file:" && 
+         protocol !== "data:")) {
       
       // Define supported mime types for WebP conversion
       const supportedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/bmp'];
@@ -166,16 +197,18 @@ export function imageTagProcessor(app: Plugin,
       // Only convert supported mime types
       if (supportedMimeTypes.includes(mimeType)) {
         try {
-          logError("Converting to WebP: " + mimeType, false);
+          logError("Converting to WebP: " + mimeType + " for link: " + link, false);
           // Convert to WebP using the imported function
           fileData = await convertToWebp(fileData, mimeType, settings.webpQuality);
           // Update file extension to webp
           fileExt = 'webp';
-          logError("WebP conversion successful", false);
+          logError("WebP conversion successful for: " + link, false);
         } catch (error) {
           logError("WebP conversion failed: " + error, false);
           // Continue with original file if conversion fails
         }
+      } else {
+        logError("Mime type not supported for WebP conversion: " + mimeType, false);
       }
     }
           const { fileName, needWrite } = await chooseFileName(
@@ -196,6 +229,9 @@ export function imageTagProcessor(app: Plugin,
 
           if (needWrite && fileName) {
             await app.app.vault.createBinary(fileName, fileData);
+            
+            // Mark this file as processed to prevent double processing
+            app.processedFiles.add(fileSignature);
           }
 
           if (fileName) {
@@ -233,17 +269,26 @@ export function imageTagProcessor(app: Plugin,
                 // image size has higher priority
                 (!settings.useCaptions || !imgsize.length) ? caption="" : caption="\|"+imgsize;
 
-                 return  [match, `![[${pathWiki}${caption}]]`, `${shortName}`];
+                 const replacement = `![[${pathWiki}${caption}]]`;
+                 logError(`Wiki link replacement: ${replacement} for original link: ${link}`, false);
+                 // Mark this file as processed to prevent double processing
+                 app.processedFiles.add(fileSignature);
+                 return  [match, replacement, `${shortName}`];
               }
               
               else{
                 ( !settings.useCaptions || !caption.length ) ? caption="" : caption=" "+caption;
-                 return [match,`![${anchor}](${pathMd}${caption})`, `${shortName}`];
+                const replacement = `![${anchor}](${pathMd}${caption})`;
+                logError(`Markdown link replacement: ${replacement} for original link: ${link}`, false);
+                // Mark this file as processed to prevent double processing
+                app.processedFiles.add(fileSignature);
+                return [match, replacement, `${shortName}`];
               }
 
 
 
           } else {
+            logError("No valid filename generated", false);
             return null;
           }
 
@@ -387,6 +432,12 @@ async function chooseFileName(
   imgWidth?: number,
   imgHeight?: number
 ): Promise<{ fileName: string; needWrite: boolean }> {
+  // Initialize baseName to prevent ReferenceError
+  let baseName = "";
+  
+  logError("chooseFileName - Input parameters:", false);
+  logError(`Link: ${link}, NoteName: ${noteName}, Counter: ${counter}`, false);
+  
   const parsedUrl = new URL(link);
   const ignoredExt = settings.ignoredExt.split("|");
   let fileExt = await getFileExt(contentData, parsedUrl.pathname);
@@ -423,27 +474,41 @@ async function chooseFileName(
   let fileName = "";
   let suggestedName = "";
   
-  // Use custom renaming rule if provided and MD5 is not required
-  if (settings.imageRenameRule && !settings.useMD5ForNewAtt) {
+  // Always use renameImage for consistent naming across pasted and downloaded images
+  if (settings.imageRenameRule) {
+    // Get the base filename from the link
+    const linkBaseName = path.basename(link);
+    logError("Using renameImage with: " + linkBaseName + ", rule: " + settings.imageRenameRule + 
+             ", noteName: " + noteName + ", counter: " + counter, false);
+    
     // Pass the original note name without any transformation to preserve spaces
-    // This ensures consistency between online and pasted images
-    const newName = renameImage(path.basename(link), settings.imageRenameRule, noteName, counter, imgWidth, imgHeight, targetExt);
+    const newName = renameImage(linkBaseName, settings.imageRenameRule, noteName, counter, imgWidth, imgHeight, targetExt);
+    logError("Generated new name: " + newName, false);
+    
     // If targetExt is defined, the extension is already included in newName
     if (targetExt) {
       suggestedName = pathJoin([dir, cleanFileName(newName)]);
     } else {
       suggestedName = pathJoin([dir, cleanFileName(`${newName}.${fileExt}`)]);
     }
+  } else if (!settings.useMD5ForNewAtt) {
+    // Use a simple counter-based name if no rename rule and not using MD5
+    const extensionToUse = targetExt || fileExt;
+    suggestedName = pathJoin([dir, cleanFileName(`image-${counter}.${extensionToUse}`)]);
   } else {
     // Fallback to MD5-based naming
-    const baseName = md5Sig(contentData);
+    baseName = md5Sig(contentData);
     // Use targetExt if available, otherwise use the original fileExt
     const extensionToUse = targetExt || fileExt;
     suggestedName = pathJoin([dir, cleanFileName(`${baseName}.${extensionToUse}`)]);
   }
+  
+  logError(`Generated baseName: ${baseName}, Extension: ${fileExt}`, false);
     if (await adapter.exists(suggestedName, false)) {
       const fileData = await adapter.readBinary(suggestedName);
             const existing_file_md5 = md5Sig(fileData);
+            logError(`Checking existing file: ${suggestedName}`, false);
+            logError(`Existing MD5: ${existing_file_md5}, Current MD5: ${baseName}`, false);
             if (existing_file_md5 === baseName){
               fileName = suggestedName;
               needWrite = false;
@@ -451,7 +516,9 @@ async function chooseFileName(
             else{
               // Use targetExt if available, otherwise use the original fileExt
               const extensionToUse = targetExt || fileExt;
-              fileName = pathJoin([dir, cleanFileName(Math.random().toString(9).slice(2,) +`.${extensionToUse}`)]);
+              const randomName = Math.random().toString(9).slice(2,);
+              fileName = pathJoin([dir, cleanFileName(randomName +`.${extensionToUse}`)]);
+              logError(`Generated random filename: ${fileName}`, false);
             }
 
     } else {
@@ -466,4 +533,196 @@ async function chooseFileName(
   //linkHashes.ensureHashGenerated(link, contentData);
 
   return { fileName, needWrite };
+}
+
+// Helper function to check if a file should be skipped based on path
+// This should be consistent with the skipProcessingForPaths logic in main.ts
+export function shouldSkipProcessing(app: Plugin, filePath: string, noteId: string): boolean {
+  if (!app.processedFiles) {
+    return false;
+  }
+  
+  const fileSignature = md5Sig(filePath + noteId);
+  return app.processedFiles.has(fileSignature);
+}
+
+/**
+ * Process markdown files on a timer to find and handle image links
+ * @param app The plugin instance
+ * @param settings Plugin settings
+ */
+export async function processMdFilesOnTimer(app: Plugin, settings: ISettings): Promise<void> {
+  try {
+    // Get all markdown files in the vault
+    const markdownFiles = app.app.vault.getMarkdownFiles();
+    
+    for (const file of markdownFiles) {
+      try {
+        // Read the file content
+        const content = await app.app.vault.read(file);
+        
+        // Check if the file contains markdown image links
+        const hasImageLinks = MD_SEARCH_PATTERN.test(content);
+        
+        // Reset the regex lastIndex to ensure it works correctly in subsequent calls
+        MD_SEARCH_PATTERN.lastIndex = 0;
+        
+        if (hasImageLinks) {
+          logError(`Found markdown image links in file: ${file.path}`, false);
+          
+          // If the file contains image links, process it
+          // This assumes there's a processPage function defined elsewhere
+          // that will be called to process the file
+          if (app.processPage) {
+            logError(`Processing file with image links: ${file.path}`, false);
+            await app.processPage(file, false);
+          } else {
+            logError(`processPage function not available for file: ${file.path}`, false);
+          }
+        }
+      } catch (error) {
+        logError(`Error processing file ${file.path}: ${error}`, false);
+      }
+    }
+  } catch (error) {
+    logError(`Error in processMdFilesOnTimer: ${error}`, false);
+  }
+}
+
+/**
+ * Handle a markdown image link by downloading and processing the image
+ * @param app The plugin instance
+ * @param noteFile The note file containing the image link
+ * @param link The image URL
+ * @param settings Plugin settings
+ * @returns The processed image information or null if processing failed
+ */
+export async function handleMarkdownImageLink(
+  app: Plugin,
+  noteFile: TFile,
+  link: string,
+  settings: ISettings
+): Promise<any> {
+  try {
+    // Skip if not a valid URL
+    if (!isUrl(link) || !link.startsWith('http')) {
+      logError(`Invalid image URL: ${link}`, false);
+      return null;
+    }
+    
+    // Generate a unique signature for this file to prevent double processing
+    const noteId = noteFile.path;
+    const fileSignature = md5Sig(link + noteId);
+    
+    // Skip if already processed
+    if (app.processedFiles && app.processedFiles.has(fileSignature)) {
+      logError(`Skipping already processed image: ${link}`, false);
+      return null;
+    }
+    
+    // Download the image
+    logError(`Downloading image from URL: ${link}`, false);
+    let fileData: ArrayBuffer | null = null;
+    let tryCount = 0;
+    
+    while (tryCount < settings.tryCount && fileData === null) {
+      try {
+        fileData = await downloadImage(link);
+        if (fileData !== null) {
+          logError(`Download successful on attempt: ${tryCount}`, false);
+          break;
+        }
+      } catch (error) {
+        logError(`Download attempt ${tryCount} failed: ${error}`, false);
+      }
+      tryCount++;
+    }
+    
+    if (fileData === null) {
+      logError(`Failed to download image after ${settings.tryCount} attempts`, false);
+      return null;
+    }
+    
+    // Process the downloaded image
+    const mediaDir = await getMDir(app.app, noteFile, settings, false);
+    await app.ensureFolderExists(mediaDir);
+    
+    // Get file extension and prepare for WebP conversion if needed
+    const parsedUrl = new URL(link);
+    let fileExt = await getFileExt(fileData, parsedUrl.pathname);
+    
+    // Convert to WebP if enabled for web images
+    if (settings.convertWebpForWebImages) {
+      const supportedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/bmp'];
+      let mimeType = 'image/jpeg'; // Default
+      
+      if (fileExt === 'png') mimeType = 'image/png';
+      else if (fileExt === 'gif') mimeType = 'image/gif';
+      else if (fileExt === 'bmp') mimeType = 'image/bmp';
+      else if (fileExt === 'jpg' || fileExt === 'jpeg') mimeType = 'image/jpeg';
+      
+      if (supportedMimeTypes.includes(mimeType)) {
+        try {
+          logError(`Converting to WebP: ${mimeType} for link: ${link}`, false);
+          fileData = await convertToWebp(fileData, mimeType, settings.webpQuality);
+          fileExt = 'webp';
+          logError(`WebP conversion successful for: ${link}`, false);
+        } catch (error) {
+          logError(`WebP conversion failed: ${error}`, false);
+        }
+      }
+    }
+    
+    // Get a counter for this note
+    if (!app.imageCounters) {
+      app.imageCounters = new Map();
+    }
+    
+    if (!app.imageCounters.has(noteId)) {
+      app.imageCounters.set(noteId, 0);
+    }
+    
+    const counter = app.getNextCounter ? 
+      await app.getNextCounter(noteId) : 
+      (app.imageCounters.set(noteId, app.imageCounters.get(noteId) + 1), app.imageCounters.get(noteId));
+    
+    // Choose a filename for the downloaded image
+    const { fileName, needWrite } = await chooseFileName(
+      app.app.vault.adapter,
+      mediaDir,
+      link,
+      fileData,
+      settings,
+      noteFile.basename,
+      counter
+    );
+    
+    if (!fileName) {
+      logError(`Failed to generate filename for: ${link}`, false);
+      return null;
+    }
+    
+    // Save the file if needed
+    if (needWrite) {
+      await app.app.vault.createBinary(fileName, fileData);
+      
+      // Mark as processed
+      if (!app.processedFiles) {
+        app.processedFiles = new Set();
+      }
+      app.processedFiles.add(fileSignature);
+    }
+    
+    // Return the file information
+    const rdir = await getRDir(noteFile, settings, fileName, link);
+    return {
+      fileName,
+      pathWiki: rdir[0],
+      pathMd: rdir[1],
+      originalLink: link
+    };
+  } catch (error) {
+    logError(`Error handling markdown image link: ${error}`, false);
+    return null;
+  }
 }

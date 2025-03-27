@@ -25,6 +25,9 @@ export function renameImage(
     const extensionMatch = originalName.match(/\.([^.]+)$/);
     const extension = targetExtension ? `.${targetExtension}` : (extensionMatch ? extensionMatch[0] : '');
     
+    // Extract the filename without extension for the {filename} placeholder
+    const filenameWithoutExt = originalName.replace(/\.[^.]+$/, '');
+    
     // Remove the extension from the rule if it exists
     let baseRule = rule;
     if (baseRule.includes('.')) {
@@ -86,6 +89,9 @@ export function renameImage(
     // This ensures consistency between online and pasted images
     result = result.replace(/{notename}/g, noteName);
     
+    // Replace {filename} placeholder with the original filename (without extension)
+    result = result.replace(/{filename}/g, filenameWithoutExt);
+    
     // Replace {counter:FORMAT} placeholders
     result = result.replace(/{counter:([^}]+)}/g, (match, format) => {
         try {
@@ -118,6 +124,6 @@ export function renameImage(
         result = result.replace(/{height}/g, height.toString());
     }
     
-    // Add the original extension back
+    // Add the extension (prioritizing targetExtension if provided)
     return result + extension;
 }

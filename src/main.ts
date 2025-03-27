@@ -54,7 +54,6 @@ const fs = require('fs').promises;
 
 
 
-
 //import { count, log } from "console"
 
 export default class LocalImagesPlugin extends Plugin {
@@ -83,9 +82,226 @@ export default class LocalImagesPlugin extends Plugin {
     return counter;
   }
 
+  // Gets the current counter for a given noteId without incrementing it
+  private getCounter(noteId: string): number {
+    const counter = this.imageCounters.get(noteId);
+    return counter === undefined ? 0 : counter;
+  }
+
   // Resets the counter for the given noteId
   private resetCounter(noteId: string): void {
     this.imageCounters.set(noteId, 0);
+  }
+
+  // Helper function to read a file as ArrayBuffer
+  private readFileAsArrayBuffer(file: File): Promise<ArrayBuffer> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as ArrayBuffer);
+      reader.onerror = reject;
+      reader.readAsArrayBuffer(file);
+    });
+  }
+
+  // Enhanced helper function to handle Markdown image link paste
+  private async handleMarkdownImageLink(markdownText: string, editor: Editor, activeFile: TFile): Promise<void> {
+    // Enhanced regex to capture markdown image link: ![alt](url) with more file extensions
+    const mdImgRegex = /!\[(.*?)\]\((https?:\/\/[^\s)]+?\.(?:jpg|jpeg|png|gif|bmp|webp|avif|svg|tiff|ico))\)/i;
+    const match = markdownText.match(mdImgRegex);
+    if (!match) {
+      logError(`handleMarkdownImageLink: No valid image link found in text: ${markdownText.substring(0, 100)}...`);
+      return;
+    }
+    
+    const altText = match[1] || '';
+    const imageUrl = match[2];
+    logError(`handleMarkdownImageLink: Found Markdown image link: ${imageUrl} with alt text: ${altText}`);
+    
+    try {
+      // Fetch with custom user-agent to avoid being blocked by some servers
+      const response = await fetch(imageUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+      });
+      
+      if (!response.ok) {
+        logError(`handleMarkdownImageLink: Failed to download image from ${imageUrl} - Status: ${response.status}`);
+        showBalloon(`Failed to download image: ${response.statusText}`, this.settings.showNotifications);
+        return;
+      }
+      
+      const arrayBuffer = await response.arrayBuffer();
+      if (!arrayBuffer || arrayBuffer.byteLength === 0) {
+        logError(`handleMarkdownImageLink: Downloaded empty image from ${imageUrl}`);
+        showBalloon(`Downloaded image is empty`, this.settings.showNotifications);
+        return;
+      }
+      
+      // Get image dimensions
+      let imgWidth: number | undefined = undefined;
+      let imgHeight: number | undefined = undefined;
+      try {
+        const dimensions = await getImageDimensions(arrayBuffer);
+        if (dimensions) {
+          imgWidth = dimensions.width;
+          imgHeight = dimensions.height;
+          logError(`handleMarkdownImageLink: Image dimensions: ${imgWidth}x${imgHeight}`);
+        } else {
+          logError(`handleMarkdownImageLink: Could not determine image dimensions`);
+        }
+      } catch (error) {
+        logError(`handleMarkdownImageLink: Error getting image dimensions: ${error}`);
+      }
+      
+      // Normalize MIME type
+      let finalData = arrayBuffer;
+      let finalMimeType = response.headers.get("content-type") || '';
+      
+      // Handle missing or incorrect MIME types
+      if (!finalMimeType || finalMimeType === 'application/octet-stream') {
+        // Try to determine MIME type from URL extension
+        const urlExt = imageUrl.split('.').pop().toLowerCase();
+        if (urlExt) {
+          switch (urlExt) {
+            case 'jpg':
+            case 'jpeg':
+              finalMimeType = 'image/jpeg';
+              break;
+            case 'png':
+              finalMimeType = 'image/png';
+              break;
+            case 'gif':
+              finalMimeType = 'image/gif';
+              break;
+            case 'webp':
+              finalMimeType = 'image/webp';
+              break;
+            case 'svg':
+              finalMimeType = 'image/svg+xml';
+              break;
+            case 'avif':
+              finalMimeType = 'image/avif';
+              break;
+            case 'tiff':
+            case 'tif':
+              finalMimeType = 'image/tiff';
+              break;
+            case 'ico':
+              finalMimeType = 'image/x-icon';
+              break;
+            default:
+              finalMimeType = 'image/png'; // Default fallback
+          }
+        } else {
+          finalMimeType = 'image/png'; // Default fallback
+        }
+        logError(`handleMarkdownImageLink: Determined MIME type from URL: ${finalMimeType}`);
+      }
+      
+      // Extract extension from MIME type
+      let finalExtension = finalMimeType.split("/")[1] || 'png';
+      if (finalExtension === 'jpeg') finalExtension = 'jpg';
+      if (finalExtension === 'svg+xml') finalExtension = 'svg';
+      if (finalExtension === 'x-icon') finalExtension = 'ico';
+      
+      let webpConversionSuccessful = false;
+      
+      // Convert to WebP if enabled
+      if (this.settings.convertWebpForPastedImages) {
+        logError(`handleMarkdownImageLink: WebP conversion enabled, attempting conversion...`);
+        
+        // Skip conversion for SVG files
+        if (finalMimeType === 'image/svg+xml') {
+          logError(`handleMarkdownImageLink: Skipping WebP conversion for SVG file`);
+        } else {
+          try {
+            const mimeTypeForConversion = finalMimeType || 'image/png';
+            const webpData = await convertToWebp(arrayBuffer, mimeTypeForConversion, this.settings.webpQuality);
+            
+            if (webpData && webpData.byteLength > 0) {
+              finalData = webpData;
+              finalMimeType = 'image/webp';
+              finalExtension = 'webp';
+              webpConversionSuccessful = true;
+              logError(`handleMarkdownImageLink: WebP conversion successful`);
+            } else {
+              logError(`handleMarkdownImageLink: WebP conversion produced empty data, using original format`);
+            }
+          } catch (error) {
+            logError(`handleMarkdownImageLink: WebP conversion failed: ${error}. Using original format.`);
+          }
+        }
+      } else {
+        logError(`handleMarkdownImageLink: WebP conversion not enabled, using original format: ${finalMimeType}`);
+      }
+      
+      // Get the media directory for this note
+      const mdir = await getMDir(this.app, activeFile, this.settings);
+      logError(`handleMarkdownImageLink: Media directory for note: ${mdir}`);
+      await this.ensureFolderExists(mdir);
+      
+      // Get the counter
+      const noteId = activeFile.path;
+      const counter = this.getNextCounter(noteId);
+      
+      // Generate filename from URL
+      let urlParts = imageUrl.split('/');
+      let originalFileName = urlParts[urlParts.length - 1];
+      
+      // Remove query parameters from filename
+      if (originalFileName.includes('?')) {
+        originalFileName = originalFileName.split('?')[0];
+      }
+      
+      // If filename is generic without extension, force set a default name
+      if (!originalFileName.includes('.') || originalFileName.trim() === '') {
+        logError(`handleMarkdownImageLink: Pasted image file seems generic or missing extension`);
+        originalFileName = `pasted-image-${Date.now()}.${finalExtension}`;
+      }
+      
+      // Generate the final filename
+      const finalFilename = renameImage(
+        originalFileName,
+        this.settings.imageRenameRule,
+        activeFile.basename,
+        counter,
+        imgWidth,
+        imgHeight,
+        finalExtension
+      );
+      
+      const finalPath = pathJoin([mdir, finalFilename]);
+      
+      // Add to skip processing paths to prevent duplicate processing
+      this.skipProcessingForPaths.add(finalPath);
+      this.schedulePathForSkipProcessingCleanup(finalPath);
+      
+      // Save image file locally
+      logError(`handleMarkdownImageLink: Saving image to: ${finalPath}`);
+      await this.app.vault.adapter.writeBinary(finalPath, finalData);
+      logError(`handleMarkdownImageLink: Image saved successfully to ${finalPath}`);
+      
+      // Add to processed files
+      this.processedPastedFiles.add(finalPath);
+      
+      // Get relative path for markdown replacement
+      const newlink = await getRDir(activeFile, this.settings, finalPath);
+      
+      // Create markdown link with original alt text
+      const markdownLink = `![[${newlink[0]}|${altText}]]`;
+      
+      // Replace the markdown link in the editor with the new local link
+      const content = editor.getValue();
+      const newContent = content.replace(match[0], markdownLink);
+      editor.setValue(newContent);
+      
+      logError(`handleMarkdownImageLink: Replaced original Markdown image link with local link: ${markdownLink}`);
+      showBalloon(`Image downloaded and saved as ${finalFilename}`, this.settings.showNotifications);
+    } catch (error) {
+      logError(`handleMarkdownImageLink: Error processing Markdown image link: ${error}`);
+      showBalloon(`Error processing image link: ${error.message}`, this.settings.showNotifications);
+    }
   }
 
   async onload() {
@@ -147,6 +363,7 @@ export default class LocalImagesPlugin extends Plugin {
         callback: () => { this.removeOrphans("plugin")() },
       })
     }
+
 
 
 
@@ -300,6 +517,7 @@ export default class LocalImagesPlugin extends Plugin {
 
 
 
+
   setupQueueInterval() {
     if (this.intervalId) {
       const intervalId = this.intervalId
@@ -342,12 +560,21 @@ export default class LocalImagesPlugin extends Plugin {
       return null;
     }
 
-    // Reset counter for this note when starting to process it
-    this.resetCounter(file.path);
+    // Get the current counter for this note (without resetting it)
+    const currentCounter = this.getCounter(file.path);
+    logError(`Current counter for note: ${file.path} is ${currentCounter}`);
 
     const content = await this.app.vault.cachedRead(file)
     if (content.length == 0) {return null}
-      
+    
+    logError(`Content length: ${content.length}`);
+    logError(`Content preview: ${content.substring(0, 100)}...`);
+    logError(`Testing regex patterns on content...`);
+    
+    // Log each regex pattern test result
+    for (const reg_p of MD_SEARCH_PATTERN) {
+      logError(`Pattern ${reg_p.toString()} test result: ${reg_p.test(content)}`);
+    }
 
     const fixedContent = await replaceAsync(
       content,
@@ -358,7 +585,6 @@ export default class LocalImagesPlugin extends Plugin {
         defaultdir
       )
     )
-
 
 
 
@@ -412,7 +638,6 @@ export default class LocalImagesPlugin extends Plugin {
     const pagesCount = files.length
 
     const notice = this.settings.showNotifications
-
       ? new Notice(
         APP_TITLE + `\nStart processing. Total ${pagesCount} pages. `,
         TIMEOUT_LIKE_INFINITY
@@ -457,15 +682,23 @@ export default class LocalImagesPlugin extends Plugin {
         return;
       }
       
-      // Get the next counter for this note
+      // Get the noteId for counter tracking
       const noteId = activeFile.path;
-      const counter = this.getNextCounter(noteId);
+      
+      // Get the current counter for this note (without resetting it)
+      const currentCounter = this.getCounter(noteId);
+      logError(`Current counter for note: ${noteId} is ${currentCounter}`);
       
       // Get the media directory for this note
       const mdir = await getMDir(this.app, activeFile, this.settings);
       logError(`Media directory for note: ${mdir}`);
       await this.ensureFolderExists(mdir);
       
+      // Get Obsidian's default attachment folder for estimating default paths
+      const obsmdir = await getMDir(this.app, activeFile, this.settings, true);
+      logError(`Obsidian default media directory: ${obsmdir}`);
+      
+      // Process files sequentially to avoid counter races
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         const fileId = `${Date.now()}-${i}`; // Unique identifier for logging
@@ -475,16 +708,23 @@ export default class LocalImagesPlugin extends Plugin {
           logError(`[${fileId}] Skipping non-image file: ${file.name} (${file.type})`);
           continue;
         }
+        if (!file.name.includes('.')) {
+          logError(`[${fileId}] Pasted file seems generic or missing extension, possible web image paste: ${file.name}`);
+        }
         
         logError(`[${fileId}] Processing pasted image: ${file.name} (${file.type})`);
         
-        // Read the file as ArrayBuffer
-        const reader = new FileReader();
-        const originalData = await new Promise<ArrayBuffer>((resolve, reject) => {
-          reader.onload = () => resolve(reader.result as ArrayBuffer);
-          reader.onerror = reject;
-          reader.readAsArrayBuffer(file);
-        });
+        // Estimate the default path that Obsidian might create
+        const defaultObsidianPath = pathJoin([obsmdir, file.name]);
+        logError(`[${fileId}] Estimated default Obsidian path: ${defaultObsidianPath}`);
+        
+        // Add the default path to skip processing immediately
+        this.skipProcessingForPaths.add(defaultObsidianPath);
+        this.schedulePathForSkipProcessingCleanup(defaultObsidianPath);
+        logError(`[${fileId}] Added default path to skip processing: ${defaultObsidianPath}`);
+        
+        // Read the file as ArrayBuffer using new helper
+        const originalData = await this.readFileAsArrayBuffer(file);
         
         // Get image dimensions from the original data
         let imgWidth: number | undefined = undefined;
@@ -511,26 +751,30 @@ export default class LocalImagesPlugin extends Plugin {
         
         // DECISION BLOCK: Determine whether to convert to WebP
         if (this.settings.convertWebpForPastedImages) {
-          logError(`[${fileId}] WebP conversion enabled, attempting conversion...`);
+          logError(`[${fileId}] WebP conversion enabled, FORCING conversion for all pasted images...`);
           try {
-            const webpData = await convertToWebp(originalData, file.type, this.settings.webpQuality);
+            // Always force WebP conversion using file.type or default to image/png
+            const mimeTypeForConversion = file.type || 'image/png';
+            logError(`[${fileId}] FORCING WebP conversion from mime type: ${mimeTypeForConversion}`);
+            
+            const webpData = await convertToWebp(originalData, mimeTypeForConversion, this.settings.webpQuality);
             finalData = webpData;
             finalMimeType = 'image/webp';
             finalExtension = 'webp';
             webpConversionSuccessful = true;
-            logError(`[${fileId}] WebP conversion successful`);
-            
-            // Since we're converting to WebP, we'll want to delete the original file
-            // This will be handled after saving the WebP version
+            logError(`[${fileId}] FORCED WebP conversion successful`);
           } catch (error) {
-            logError(`[${fileId}] WebP conversion failed: ${error}. Using original format.`);
+            logError(`[${fileId}] FORCED WebP conversion failed: ${error}. Using original format.`);
             // Keep the original values (already set above)
           }
         } else {
           logError(`[${fileId}] WebP conversion not enabled, using original format`);
         }
         
-        // Use the counter we got earlier
+        // Get a fresh counter for each file
+        const counter = this.getNextCounter(noteId);
+        logError(`[${fileId}] Using counter: ${counter} for file`);
+        
         // Generate the final filename ONCE after conversion decision is complete
         const finalFilename = renameImage(
           file.name,
@@ -551,6 +795,11 @@ export default class LocalImagesPlugin extends Plugin {
           continue;
         }
         
+        // Add to skip processing paths to prevent duplicate processing BEFORE saving
+        this.skipProcessingForPaths.add(finalPath);
+        this.schedulePathForSkipProcessingCleanup(finalPath);
+        logError(`[${fileId}] Added final path to skip processing: ${finalPath}`);
+        
         // SINGLE SAVE OPERATION BLOCK
         logError(`[${fileId}] --- SAVE OPERATION START ---`);
         logError(`[${fileId}] Saving image to: ${finalPath}`);
@@ -563,13 +812,9 @@ export default class LocalImagesPlugin extends Plugin {
           
           // Track this file as processed immediately after successful save
           this.processedPastedFiles.add(finalPath);
+          logError(`[${fileId}] Added to processedPastedFiles: ${finalPath}`);
           
-          // Add to skip processing paths to prevent duplicate processing in automatic processing
-          this.skipProcessingForPaths.add(finalPath);
-          this.schedulePathForSkipProcessingCleanup(finalPath);
-          
-          logError(`[${fileId}] Image saved successfully to ${finalPath}`);
-          logError(`[${fileId}] Added to skip processing list to prevent duplicate processing`);
+          logError(`[${fileId}] Image saved successfully to ${finalPath} with counter ${counter}`);
           
           // Get the relative path for the markdown link
           const newlink = await getRDir(activeFile, this.settings, finalPath);
@@ -598,19 +843,17 @@ export default class LocalImagesPlugin extends Plugin {
                 shouldInsertMarkdownLink = false;
                 logError(`[${fileId}] Successfully replaced original link with WebP link. No new link needed.`);
                 
-                // Delete the original file to prevent duplicate processing
-                try {
-                  if (await this.app.vault.adapter.exists(originalFilePath)) {
-                    await this.app.vault.adapter.remove(originalFilePath);
-                    logError(`[${fileId}] Deleted original file after WebP conversion: ${originalFilePath}`);
-                    
-                    // Also add the original path to skip processing
-                    this.skipProcessingForPaths.add(originalFilePath);
-                    this.schedulePathForSkipProcessingCleanup(originalFilePath);
+                // Schedule a delayed deletion of the original file to prevent race conditions
+                setTimeout(async () => {
+                  try {
+                    if (await this.app.vault.adapter.exists(originalFilePath)) {
+                      await this.app.vault.adapter.remove(originalFilePath);
+                      logError(`[${fileId}] Deleted original file after WebP conversion: ${originalFilePath}`);
+                    }
+                  } catch (error) {
+                    logError(`[${fileId}] Error deleting original file: ${error}`);
                   }
-                } catch (error) {
-                  logError(`[${fileId}] Error deleting original file: ${error}`);
-                }
+                }, 500); // 500ms delay to ensure file operations have completed
               } else {
                 logError(`[${fileId}] Could not find original link to replace, will insert new link`);
               }
@@ -623,8 +866,25 @@ export default class LocalImagesPlugin extends Plugin {
             }
           }
           
+          // Schedule a delayed check for the default Obsidian file
+          setTimeout(async () => {
+            try {
+              if (await this.app.vault.adapter.exists(defaultObsidianPath)) {
+                logError(`[${fileId}] Found default Obsidian file, attempting to delete: ${defaultObsidianPath}`);
+                await this.app.vault.adapter.remove(defaultObsidianPath);
+                logError(`[${fileId}] Successfully deleted default Obsidian file: ${defaultObsidianPath}`);
+              }
+            } catch (error) {
+              logError(`[${fileId}] Error checking/deleting default Obsidian file: ${error}`);
+            }
+          }, 500); // 500ms delay to ensure Obsidian has created the file
+          
           logError(`[${fileId}] --- SAVE OPERATION END ---`);
         } catch (error) {
+          // Remove from skip processing if save failed
+          this.skipProcessingForPaths.delete(finalPath);
+          logError(`[${fileId}] Error saving image, removed from skip processing: ${finalPath}`);
+          
           logError(`[${fileId}] Error saving image: ${error}`);
           showBalloon(`Error saving image: ${error}`, this.settings.showNotifications);
         }
@@ -647,9 +907,18 @@ export default class LocalImagesPlugin extends Plugin {
       const activeFile = this.getCurrentNote()
       const fItems = evt.clipboardData.files
       const tItems = evt.clipboardData.items
- 
-      // Removed early return to allow processing of pasted images
-      
+
+      // Check for Markdown image link in pasted text with expanded regex
+      const pastedText = evt.clipboardData.getData("text");
+      const mdImgRegex = /!\[.*?\]\((https?:\/\/[^\s)]+?\.(?:jpg|jpeg|png|gif|bmp|webp|avif|svg|tiff|ico))\)/i;
+      if (pastedText && mdImgRegex.test(pastedText)) {
+        logError("Markdown image link detected in paste event: " + pastedText);
+        showBalloon("Markdown image link detected, processing...", this.settings.showNotifications);
+        await this.handleMarkdownImageLink(pastedText, editor, activeFile);
+        evt.preventDefault();
+        return;
+      }
+
       for (const key in tItems) {
 
         // Check if it was a text/html
@@ -969,41 +1238,138 @@ export default class LocalImagesPlugin extends Plugin {
         this.setupQueueInterval()
         this.setupNewMdFilesProcInterval()
  
-    
   }
 
   private async onFCreateFunc(file: TFile) {
-    // Skip processing if this file has already been handled by handlePastedFiles
-    if (this.processedPastedFiles && this.processedPastedFiles.has(file.path)) {
+    // First check if this file should be skipped - do this check before any other processing
+    if (!file || !(file instanceof TFile)) {
+      return;
+    }
+    
+    // Check both sets at the beginning to ensure we don't process files that are already handled
+    if (this.processedPastedFiles.has(file.path)) {
       logError(`Skipping already processed pasted file: ${file.path}`);
       return;
     }
     
-    // Also skip if the file is in the skipProcessingForPaths set
     if (this.skipProcessingForPaths.has(file.path)) {
       logError(`Skipping file that is marked for skip processing: ${file.path}`);
       return;
     }
- 
-    if (!file ||
-      !(file instanceof TFile) ||
-      this.ExemplaryOfMD(file.path)||
-      this.ExemplaryOfCANVAS(file.path)||
-      !(this.settings.processAll))
-      return
+    
+    // Continue with normal processing only if the file passes all checks
+    if (this.ExemplaryOfMD(file.path) || 
+        this.ExemplaryOfCANVAS(file.path) || 
+        !this.settings.processAll) {
+      return;
+    }
 
-    if (!file.stat.ctime)
-      return
+    if (!file.stat.ctime) {
+      return;
+    }
 
-    const timeGapMs = Math.abs(Date.now() - file.stat.mtime)
+    const timeGapMs = Math.abs(Date.now() - file.stat.mtime);
+    if (timeGapMs > 1000) {
+      return;
+    }
 
-    if (timeGapMs > 1000)
-      return
-
-    this.newfCreated.push(file.path)
-    this.newfMoveReq = true
-    this.setupNewMdFilesProcInterval()
-    logError("file created  ")
+    // Check if this is an image file that should be converted to WebP
+    const fileExt = file.path.toLowerCase().split('.').pop();
+    const isConvertibleImage = ['png', 'jpg', 'jpeg', 'gif', 'bmp'].includes(fileExt);
+    const isAlreadyWebp = file.path.toLowerCase().includes('.webp');
+    
+    if (isConvertibleImage && !isAlreadyWebp && this.settings.convertWebpForPastedImages) {
+      logError(`Web browser pasted image detected: ${file.path}, will convert to WebP`);
+      
+      try {
+        // Get the active note
+        const activeFile = this.getCurrentNote();
+        if (!activeFile) {
+          logError(`No active note found for WebP conversion of: ${file.path}`);
+          return;
+        }
+        
+        // Get the media directory for this note
+        const mdir = await getMDir(this.app, activeFile, this.settings);
+        await this.ensureFolderExists(mdir);
+        
+        // Get a counter for the image
+        const noteId = activeFile.path;
+        const counter = this.getNextCounter(noteId);
+        
+        // Read the original file
+        const originalData = await this.app.vault.adapter.readBinary(file.path);
+        
+        // Get image dimensions if possible
+        let imgWidth: number | undefined = undefined;
+        let imgHeight: number | undefined = undefined;
+        try {
+          const dimensions = await getImageDimensions(originalData);
+          if (dimensions) {
+            imgWidth = dimensions.width;
+            imgHeight = dimensions.height;
+            logError(`Image dimensions for ${file.path}: ${imgWidth}x${imgHeight}`);
+          }
+        } catch (error) {
+          logError(`Error getting image dimensions for ${file.path}: ${error}`);
+        }
+        
+        // Convert to WebP
+        logError(`Converting ${file.path} to WebP...`);
+        const mimeType = `image/${fileExt === 'jpg' ? 'jpeg' : fileExt}`;
+        const webpData = await convertToWebp(originalData, mimeType, this.settings.webpQuality);
+        
+        // Generate new filename with WebP extension
+        const originalFileName = path.basename(file.path);
+        const finalFilename = renameImage(
+          originalFileName,
+          this.settings.imageRenameRule,
+          activeFile.basename,
+          counter,
+          imgWidth,
+          imgHeight,
+          'webp'
+        );
+        
+        // Create the final path for the WebP file
+        const finalPath = pathJoin([mdir, finalFilename]);
+        
+        // Save the WebP file
+        logError(`Saving WebP image to: ${finalPath}`);
+        await this.app.vault.adapter.writeBinary(finalPath, webpData);
+        
+        // Add to processed files to prevent duplicate processing
+        this.processedPastedFiles.add(finalPath);
+        this.skipProcessingForPaths.add(finalPath);
+        this.schedulePathForSkipProcessingCleanup(finalPath);
+        
+        // Get the relative path for the markdown link
+        const newlink = await getRDir(activeFile, this.settings, finalPath);
+        const markdownLink = `![[${newlink[0]}]]`;
+        
+        // Insert the link into the editor if possible
+        const editor = this.app.workspace.activeEditor?.editor;
+        if (editor) {
+          editor.replaceSelection(markdownLink);
+          logError(`Inserted markdown link: ${markdownLink}`);
+        }
+        
+        // Delete the original file
+        logError(`Deleting original file: ${file.path}`);
+        await this.app.vault.adapter.remove(file.path);
+        
+        // Skip normal processing
+        return;
+      } catch (error) {
+        logError(`Error converting web browser pasted image to WebP: ${error}`);
+        // Continue with normal processing if conversion fails
+      }
+    }
+    
+    logError(`File created and will be processed: ${file.path}`);
+    this.newfCreated.push(file.path);
+    this.newfMoveReq = true;
+    this.setupNewMdFilesProcInterval();
   }
 
 
@@ -1035,21 +1401,17 @@ export default class LocalImagesPlugin extends Plugin {
 
     try {
 
-
       window.clearInterval(this.newfProcInt)
       this.newfProcInt = 0
       this.newfMoveReq = false
       let itemcount = 0
       const useMdLinks = this.app.vault.getConfig("useMarkdownLinks")
 
-
-
       for (let note of this.noteModified) {
 
         const metaCache = this.app.metadataCache.getFileCache(note)
         let filedata = await this.app.vault.cachedRead(note)
         
-
         let pr = false
         for (const reg_p of MD_SEARCH_PATTERN) {
           if (reg_p.test(filedata)) {
@@ -1058,13 +1420,9 @@ export default class LocalImagesPlugin extends Plugin {
           }
         }
 
- 
-
         const mdir = await getMDir(this.app, note, this.settings)
         const obsmdir = await getMDir(this.app, note, this.settings, true)
         let embeds = metaCache?.embeds
-
-
 
         if (obsmdir != "" && ! await this.app.vault.adapter.exists(obsmdir)) {
          if ( ! this.settings.DoNotCreateObsFolder){
@@ -1075,10 +1433,10 @@ export default class LocalImagesPlugin extends Plugin {
           return
         }
 
-
-
         if (embeds || pr) {
-
+          // Explicitly call processPage for each modified note
+          logError(`Explicitly calling processPage for note: ${note.path}`);
+          await this.processPage(note);
 
           await this.ensureFolderExists(mdir)
 
@@ -1090,25 +1448,32 @@ export default class LocalImagesPlugin extends Plugin {
             let oldtag = el["original"];
             logError(useMdLinks)
 
-
-
             logError(this.newfCreated)
             
-            // Skip if this file has been processed by the WebP conversion
-            if (this.skipProcessingForPaths.has(oldpath) || this.skipProcessingForPaths.has(el.link)) {
-              logError(`Skipping automatic processing for already processed file: ${el.link}`);
+            // Check both skipProcessingForPaths and processedPastedFiles at the beginning
+            // to ensure we don't process files that are already handled
+            if (this.skipProcessingForPaths.has(oldpath) || 
+                this.skipProcessingForPaths.has(el.link) ||
+                this.processedPastedFiles.has(oldpath) ||
+                this.processedPastedFiles.has(el.link)) {
+              logError(`Skipping automatic processing for already processed file: ${el.link} (oldpath: ${oldpath})`);
               continue;
             }
             
+            // Add to skip processing to prevent other handlers from processing this file
+            this.skipProcessingForPaths.add(oldpath);
+            this.skipProcessingForPaths.add(el.link);
+            this.schedulePathForSkipProcessingCleanup(oldpath);
+            this.schedulePathForSkipProcessingCleanup(el.link);
+            logError(`Added to skip processing during processMdFilesOnTimer: ${oldpath}, ${el.link}`);
+            
             if ((this.newfCreated.indexOf(el.link) != -1 || (obsmdir != "" && (this.newfCreated.includes(oldpath) || this.newfCreated.includes(el.link)))) &&
               !this.newfCreatedByDownloader.includes(oldtag)) {
-
 
               if (! await this.app.vault.adapter.exists(oldpath)) {
                 logError("Cannot find " + el.link + " skipping...")
                 continue
               }
-
 
               // Get the next counter for this note
               const noteId = note.path;
@@ -1206,8 +1571,6 @@ export default class LocalImagesPlugin extends Plugin {
                 newlink = await getRDir(note, this.settings, newpath)
               }
 
-
-
               if (await this.app.vault.adapter.exists(newpath)) {
 
                 let newFMD5
@@ -1216,7 +1579,6 @@ export default class LocalImagesPlugin extends Plugin {
                 } else {
                   newFMD5 = md5Sig(await readFromDiskB(pathJoin([this.app.vault.adapter.basePath, newpath]), 5000))
                 }
-
 
                 if (newMD5 === newFMD5 || (oldMD5 === newFMD5 && oldpath != newpath)) {
 
@@ -1263,10 +1625,7 @@ export default class LocalImagesPlugin extends Plugin {
                 } catch (error) {
                   logError(error)
                 }
-
-
               }
-
 
               let addName = "";
               if (this.settings.addNameOfFile) {
@@ -1275,9 +1634,7 @@ export default class LocalImagesPlugin extends Plugin {
                 } else {
                   addName = `[[${newlink[0]}|Open: ${path.basename(el.link)}]]\r\n`
                 }
-
               }
-
 
               let newtag = addName + oldtag.replace(el.link, newlink[0])
 
@@ -1285,13 +1642,10 @@ export default class LocalImagesPlugin extends Plugin {
                 newtag = addName + oldtag.replace(encObsURI(el.link), newlink[1])
               }
 
-
               filedata = filedata.replaceAll(oldtag, newtag)
               itemcount++
             }
           }
-
-
         }
         if (itemcount > 0) {
           await this.app.vault.modify(note, filedata)
@@ -1304,8 +1658,8 @@ export default class LocalImagesPlugin extends Plugin {
       onRet()
     }
     onRet()
-
   }
+
 
 
 
@@ -1339,6 +1693,7 @@ export default class LocalImagesPlugin extends Plugin {
       return
     }
   }
+
 
 
 
@@ -1445,6 +1800,11 @@ export default class LocalImagesPlugin extends Plugin {
   }
   
   private schedulePathForSkipProcessingCleanup(path: string) {
+    if (!path) {
+      logError(`Attempted to schedule cleanup for undefined path`);
+      return;
+    }
+    
     logError(`Scheduling cleanup for path in skip list: ${path}`);
     setTimeout(() => {
       if (this.skipProcessingForPaths.has(path)) {
