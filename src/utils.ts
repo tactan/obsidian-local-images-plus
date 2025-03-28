@@ -71,117 +71,143 @@ export async function logError(str: any, isObj: boolean = false) {
   }
 };
 
-export function md5Sig(contentData: ArrayBuffer = undefined) {
-
-  try {
-
-    var dec = new TextDecoder("utf-8");
-    const arrMid = Math.round(contentData.byteLength / 2);
-    const chunk = 15000;
-    const signature = md5([
-      contentData.slice(0, chunk),
-      contentData.slice(arrMid, arrMid + chunk),
-      contentData.slice(-chunk)
-    ].map(x => dec.decode(x)).join()
-    ).toString();
- 
-    return signature + "_MD5";
-  }
-  catch (e) {
-
-    logError("Cannot generate md5: " + e, false);
+export function md5Sig(contentData: ArrayBuffer | string | null = undefined): string | null {
+  if (!contentData) {
+    logError("md5Sig: Received null or undefined contentData", false);
     return null;
   }
-
+  try {
+    let dataToHash: string;
+    if (typeof contentData === 'string') {
+      dataToHash = contentData;
+    } else if (contentData instanceof ArrayBuffer && contentData.byteLength > 0) {
+      const dec = new TextDecoder("utf-8");
+      const arrMid = Math.round(contentData.byteLength / 2);
+      const chunk = 15000;
+      const startChunk = contentData.slice(0, Math.min(chunk, contentData.byteLength));
+      const midChunk = contentData.slice(arrMid, Math.min(arrMid + chunk, contentData.byteLength));
+      const endChunk = contentData.slice(Math.max(0, contentData.byteLength - chunk));
+      dataToHash = [startChunk, midChunk, endChunk]
+        .map(x => {
+          try { return dec.decode(x); } catch { return ''; }
+        })
+        .join('');
+    } else if (contentData instanceof ArrayBuffer && contentData.byteLength === 0) {
+      logError("md5Sig: Received empty ArrayBuffer", false);
+      return null;
+    } else {
+      logError("md5Sig: Received unexpected data type or empty buffer", false);
+      return null;
+    }
+    if (!dataToHash) {
+      logError("md5Sig: No data to hash after processing input", false);
+      return null;
+    }
+    const signature = md5(dataToHash).toString();
+    return signature + "_MD5";
+  } catch (e) {
+    logError(`Cannot generate md5: ${e}`, false);
+    return null;
+  }
 }
 
 
 export async function replaceAsync(str: any, regex: RegExp | Array<RegExp>, asyncFn: any) {
-  // Ensure regex is treated as an array
-  const regexArr = Array.isArray(regex) ? regex : [regex];
+  const regexArray = Array.isArray(regex) ? regex : [regex];
+  const data = [];
+  let errorflag = false;
+  const filesArr = [];
 
   logError("replaceAsync: \r\nstr: " + str + "\r\nregex: ")
-  logError(regexArr, true);
+  logError(regexArray, true);
 
-  let errorflag = false;
-  const promises: Promise<any>[] = [];
-  let dictPatt: Array<any>[] = [];
-  let link;
-  let anchor;
-  let replp: any;
-  let caption = "";
-  let filesArr: Array<string> = [];
-  let AttSize = "";
-
-  regexArr.forEach((element) => {
-    logError("cur regex:  " + element);
-    const matches = str.matchAll(element);
-
-    for (const match of matches) {
-      logError("match: " + match)
+  for (const re of regexArray) {
+    logError("cur regex: " + re);
+    // Reset lastIndex to ensure we start from the beginning
+    if (re instanceof RegExp && re.global) {
+      re.lastIndex = 0;
+    }
     
-      anchor = trimAny(match.groups.anchor, [")", "(", "]", "[", " "]); 
+    const matches = str.matchAll(re);
+    
+    for (const match of matches) {
+      logError("match: " + match);
       
-       
-      const AttSizeMatch = anchor.matchAll(ATT_SIZE_ACHOR);
-       
-      for (const match of AttSizeMatch) {
- 
-         AttSize = (match.groups.attsize !== undefined) ?  trimAny(match.groups.attsize, [")", "(", "]", "[", " "] ): 
-                   (match.groups.attsize2 !== undefined) ?  trimAny(match.groups.attsize2, [")", "(", "]", "[", " "] ): 
-         ""; 
+      try {
+        let anchor = "";
+        let link = "";
+        let caption = "";
+        let AttSize = "";
+        
+        if (match.groups) {
+          if (match.groups.anchor) {
+            anchor = trimAny(match.groups.anchor, [")", "(", "]", "[", " "]);
+            
+            // Process attachment size if present
+            if (anchor) {
+              const AttSizeMatch = anchor.matchAll(ATT_SIZE_ACHOR);
+              for (const sizeMatch of AttSizeMatch) {
+                AttSize = (sizeMatch.groups.attsize !== undefined) ? 
+                  trimAny(sizeMatch.groups.attsize, [")", "(", "]", "[", " "]) : 
+                  (sizeMatch.groups.attsize2 !== undefined) ? 
+                    trimAny(sizeMatch.groups.attsize2, [")", "(", "]", "[", " "]) : 
+                    "";
+              }
+            }
+          }
+          
+          if (match.groups.link) {
+            link = (match.groups.link.match(MD_LINK) ?? [match.groups.link])[0];
+            caption = trimAny((match.groups.link.match(MD_LINK) !== null ?
+              (match.groups.link.split(link).length > 1 ?
+                match.groups.link.split(link)[1] : "") :
+              ""), [")", "]", "(", "[", " "]);
+            link = trimAny(link, [")", "(", "]", "[", " "]);
+          }
         }
-         
-
-      link = (match.groups.link.match(MD_LINK) ?? [match.groups.link])[0];
-      caption = trimAny((match.groups.link.match(MD_LINK) !== null ?
-        (match.groups.link.split(link).length > 1 ?
-          match.groups.link.split(link)[1] : "") :
-        ""), [")", "]", "(", "[", " "]);
-      link = trimAny(link, [")", "(", "]", "[", " "]);
-      replp = trimAny(match[0], ["[", "(", "]"]);
-
-      logError(
-        "repl: " + replp +
-        "\r\nahc: " + anchor +
-        "\r\nlink: " + link +
-        "\r\ncaption: " + caption + 
-        "\r\nAttSize: " + AttSize);
-
-      dictPatt[replp] = [anchor, link, caption, AttSize];
-
-    };
-
-  })
-
-  for (var key in dictPatt) {
-    const promise = asyncFn(key, dictPatt[key][0], dictPatt[key][1], dictPatt[key][2], dictPatt[key][3]);
-    logError(promise, true);
-    promises.push(promise);
+        
+        const replp = trimAny(match[0], ["[", "(", "]"]);
+        
+        logError(
+          "repl: " + replp +
+          "\r\nahc: " + anchor +
+          "\r\nlink: " + link +
+          "\r\ncaption: " + caption + 
+          "\r\nAttSize: " + AttSize
+        );
+        
+        const result = await asyncFn(replp, anchor, link, caption, AttSize);
+        data.push(result);
+      } catch (error) {
+        console.error('Error in replaceAsync:', error);
+        logError('Error processing match: ' + error, false);
+        data.push(null);
+        errorflag = true;
+      }
+    }
   }
 
-  const data = await Promise.all(promises);
-  logError("Promises: ");
+  logError("Processed results: ");
   logError(data, true);
-  //  return str.replace((reg: RegExp, str: String) => { 
 
   data.forEach((element) => {
-
     if (element !== null) {
-
-      logError("el: " + element[0] + "  el2: " + element[1] + element[2]);
-      str = str.replaceAll(element[0], element[1] + element[2]);
-      filesArr.push(element[1]);
-    }
-    else {
+      if (Array.isArray(element) && element.length >= 3) {
+        logError('el: ' + element[0] + '  el2: ' + element[1] + element[2]);
+        str = str.replaceAll(element[0], element[1] + element[2]);
+        filesArr.push(element[1]);
+      } else if (typeof element === 'string') {
+        logError("Skipping replacement for string element: " + element);
+      } else {
+        logError("Skipping replacement for element with unexpected format");
+      }
+    } else {
+      logError("Skipping null element");
       errorflag = true;
     }
-
   });
-
+  
   return [str, errorflag, filesArr];
-
-  //  return str.replace( () => data.shift());
 }
 
 export function isUrl(link: string) {

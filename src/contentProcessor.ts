@@ -7,13 +7,45 @@ import {
   Plugin
 } from "obsidian";
 
+// Generate a unique session ID for this plugin instance
+let currentSessionId = Date.now().toString();
+
+// Function to regenerate the session ID and clear caches
+export function regenerateSessionId(app?: Plugin): string {
+  currentSessionId = Date.now().toString();
+  processedUrlsPerFile.clear();
+  
+  // Clear the app.processedFiles set if app is provided
+  if (app && app.processedFiles instanceof Set) {
+    app.processedFiles.clear();
+    logError('Cleared global app.processedFiles set.', false);
+  } else if (app) {
+    app.processedFiles = new Set<string>();
+    logError('Initialized global app.processedFiles set.', false);
+  }
+  
+  console.log('Generated new session ID and cleared all URL caches and processed files set:', currentSessionId);
+  return currentSessionId;
+}
+
+// Function to get the current session ID
+export function getSessionId(): string {
+  return currentSessionId;
+}
+
+// Helper function to generate a unique key for a URL in a specific file
+export function getUrlKey(url: string, filePath: string): string {
+  return `${url}#${filePath}#${getSessionId()}`;
+}
+
 // Map to track processed URLs per file to prevent duplicate processing
-const processedUrlsPerFile = new Map<string, Set<string>>();
+// Using a nested Map structure: filePath -> Map of URL keys -> boolean
+const processedUrlsPerFile = new Map<string, Map<string, boolean>>();
 
 // Helper function to clear the processed URLs
 export function clearProcessedUrls(filePath?: string) {
   if (filePath) {
-    // Clear only the Set for the specified file
+    // Clear only the Map for the specified file
     processedUrlsPerFile.delete(filePath);
   } else {
     // Clear the entire Map
@@ -24,7 +56,33 @@ export function clearProcessedUrls(filePath?: string) {
 // Helper function to check if a URL is already processed for a file without modifying the tracking state
 export function isUrlProcessedForFile(url: string, filePath: string): boolean {
   const fileUrls = processedUrlsPerFile.get(filePath);
-  return fileUrls ? fileUrls.has(url) : false;
+  if (!fileUrls) return false;
+  
+  const urlKey = getUrlKey(url, filePath);
+  return fileUrls.has(urlKey);
+}
+
+// Helper function to check if a URL is already processed in any file
+export function isUrlProcessedGlobally(url: string): boolean {
+  for (const [filePath, urlMap] of processedUrlsPerFile.entries()) {
+    for (const [urlKey, processed] of urlMap.entries()) {
+      if (urlKey.startsWith(url + '#') && processed) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Helper function to mark a URL as processed for a file
+export function markUrlAsProcessed(url: string, filePath: string): void {
+  if (!processedUrlsPerFile.has(filePath)) {
+    processedUrlsPerFile.set(filePath, new Map<string, boolean>());
+  }
+  
+  const fileUrls = processedUrlsPerFile.get(filePath);
+  const urlKey = getUrlKey(url, filePath);
+  fileUrls.set(urlKey, true);
 }
 
 import { renameImage } from "./image-renamer";
@@ -69,9 +127,9 @@ export function imageTagProcessor(app: Plugin,
   // Get the file path
   const filePath = noteFile.path;
   
-  // Initialize the Set for this file if it doesn't exist
+  // Initialize the Map for this file if it doesn't exist
   if (!processedUrlsPerFile.has(filePath)) {
-    processedUrlsPerFile.set(filePath, new Set<string>());
+    processedUrlsPerFile.set(filePath, new Map<string, boolean>());
   }
                                   
   const unique = Math.random().toString(16).slice(2,);
@@ -100,18 +158,16 @@ export function imageTagProcessor(app: Plugin,
     // Get the file path
     const filePath = noteFile.path;
     
-    // Get the Set of processed URLs for this file
-    const fileProcessedUrls = processedUrlsPerFile.get(filePath);
-    
-    // Check if this URL has already been processed in this file
-    if (fileProcessedUrls && fileProcessedUrls.has(link)) {
+    // Check if this URL has already been processed in this file using the new helper function
+    if (isUrlProcessedForFile(link, filePath)) {
       logError("Skipping already processed URL in this file: " + link, false);
+      // Return original match to avoid corrupting content
       return match;
     }
     
-    // Add the URL to the processed set for this file at the beginning to prevent duplicate processing
+    // Mark the URL as processed for this file at the beginning to prevent duplicate processing
     // even if there's an error during processing
-    fileProcessedUrls.add(link);
+    markUrlAsProcessed(link, filePath);
 
     // Get a fresh counter for this note using getNextCounter if available, otherwise fallback
     const counter = app.getNextCounter ? 
@@ -125,14 +181,15 @@ export function imageTagProcessor(app: Plugin,
     // Verify link starts with http or data
     if (!isUrl(link) || !(link.startsWith('http') || link.startsWith('data:'))) {
       logError("Link is not a valid URL or doesn't start with http/data: " + link, false);
-      return match;
+      return null;
     }
     
     // Check if this file has already been processed by handlePastedFiles
     // This prevents double processing of the same file
-    const fileSignature = md5Sig(link + noteId);
-    if (app.processedFiles.has(fileSignature)) {
-      logError("Skipping already processed file: " + link, false);
+    const signatureInput = link + noteId + getSessionId();
+    const fileSignature = md5Sig(signatureInput);
+    if (fileSignature && app.processedFiles && app.processedFiles.has(fileSignature)) {
+      logError("Skipping already processed file (session signature match): " + link, false);
       return match;
     }
 
@@ -275,7 +332,10 @@ export function imageTagProcessor(app: Plugin,
             await app.app.vault.createBinary(fileName, fileData);
             
             // Mark this file as processed to prevent double processing
-            app.processedFiles.add(fileSignature);
+            if (fileSignature && app.processedFiles) {
+              app.processedFiles.add(fileSignature);
+              logError(`Added session signature to app.processedFiles: ${fileSignature}`, false);
+            }
           }
 
           if (fileName) {
@@ -316,7 +376,9 @@ export function imageTagProcessor(app: Plugin,
                  const replacement = `![[${pathWiki}${caption}]]`;
                  logError(`Wiki link replacement: ${replacement} for original link: ${link}`, false);
                  // Mark this file as processed to prevent double processing
-                 app.processedFiles.add(fileSignature);
+                 if (fileSignature) {
+                   app.processedFiles.add(fileSignature);
+                 }
                  // URL already added to processedUrls at the beginning of processing
                  return  [match, replacement, `${shortName}`];
               }
@@ -326,7 +388,9 @@ export function imageTagProcessor(app: Plugin,
                 const replacement = `![${anchor}](${pathMd}${caption})`;
                 logError(`Markdown link replacement: ${replacement} for original link: ${link}`, false);
                 // Mark this file as processed to prevent double processing
-                app.processedFiles.add(fileSignature);
+                if (fileSignature) {
+                  app.processedFiles.add(fileSignature);
+                }
                 // URL already added to processedUrls at the beginning of processing
                 return [match, replacement, `${shortName}`];
               }
@@ -588,8 +652,8 @@ export function shouldSkipProcessing(app: Plugin, filePath: string, noteId: stri
     return false;
   }
   
-  const fileSignature = md5Sig(filePath + noteId);
-  return app.processedFiles.has(fileSignature);
+  const fileSignature = md5Sig(filePath + noteId + getSessionId());
+  return fileSignature ? app.processedFiles.has(fileSignature) : false;
 }
 
 /**
@@ -661,22 +725,18 @@ export async function handleMarkdownImageLink(
     
     // Generate a unique signature for this file to prevent double processing
     const noteId = noteFile.path;
-    const fileSignature = md5Sig(link + noteId);
+    const signatureInput = link + noteId + getSessionId();
+    const fileSignature = md5Sig(signatureInput);
     
     // Skip if already processed by the app or in this file
-    if ((app.processedFiles && app.processedFiles.has(fileSignature)) || isUrlProcessedForFile(link, noteId)) {
-      logError(`Skipping already processed image: ${link}`, false);
-      return null;
+    if ((fileSignature && app.processedFiles && app.processedFiles.has(fileSignature)) || isUrlProcessedForFile(link, noteId)) {
+      logError(`Skipping already processed image (session signature or file cache): ${link}`, false);
+      // Return original match to avoid corrupting content
+      return { originalMatch: true, link };
     }
     
-    // Get or create the Set of processed URLs for this file
-    if (!processedUrlsPerFile.has(noteId)) {
-      processedUrlsPerFile.set(noteId, new Set<string>());
-    }
-    const fileProcessedUrls = processedUrlsPerFile.get(noteId);
-    
-    // Add the URL to the processed set for this file at the beginning to prevent duplicate processing
-    fileProcessedUrls.add(link);
+    // Mark the URL as processed for this file at the beginning to prevent duplicate processing
+    markUrlAsProcessed(link, noteId);
     
     // Download the image
     logError(`Downloading image from URL: ${link}`, false);
@@ -765,10 +825,11 @@ export async function handleMarkdownImageLink(
       await app.app.vault.createBinary(fileName, fileData);
       
       // Mark as processed
-      if (!app.processedFiles) {
-        app.processedFiles = new Set();
+      if (fileSignature) {
+        if (!app.processedFiles) { app.processedFiles = new Set(); }
+        app.processedFiles.add(fileSignature);
+        logError(`Added session signature to app.processedFiles from handleMarkdownImageLink: ${fileSignature}`, false);
       }
-      app.processedFiles.add(fileSignature);
       
       // URL already added to processedUrls at the beginning of processing
     }

@@ -14,6 +14,8 @@ import {
   imageTagProcessor,
   getMDir,
   getRDir,
+  clearProcessedUrls,
+  regenerateSessionId,
 } from "./contentProcessor"
 
 import { convertToWebp } from "./webp-converter"
@@ -53,7 +55,6 @@ const fs = require('fs').promises;
 
 
 
-
 //import { count, log } from "console"
 
 export default class LocalImagesPlugin extends Plugin {
@@ -69,6 +70,7 @@ export default class LocalImagesPlugin extends Plugin {
   processedPastedFiles: Set<string> = new Set() // Track processed pasted files to prevent duplicate saves
   skipProcessingForPaths: Set<string> = new Set() // Track paths that should be skipped in automatic processing
   skipProcessingTimeout: number = 30000 // Default timeout (30 seconds) for removing paths from skip list
+  currentlyProcessing = new Set<string>() // Track notes that are currently being processed
 
   // Returns the next counter for a given noteId; if not initialized, sets it to 1
   private getNextCounter(noteId: string): number {
@@ -306,6 +308,14 @@ export default class LocalImagesPlugin extends Plugin {
 
   async onload() {
 
+    // Initialize processedFiles set if it doesn't exist
+    if (!this.processedFiles) {
+      this.processedFiles = new Set();
+    }
+    
+    // Initialize currentlyProcessing set
+    this.currentlyProcessing = new Set();
+    
     await this.loadSettings()
 
     this.addCommand({
@@ -387,15 +397,26 @@ export default class LocalImagesPlugin extends Plugin {
     // Some file has been deleted
 
     this.app.vault.on('delete', async (file: TFile) => {
+      // Regenerate session ID to clear global processed URL cache and pass plugin instance
+      regenerateSessionId(this);
+      logError(`Generated new session ID after file deletion: ${file.path}`);
+      
+      // Clear processed URL cache for the deleted file
+      if (file && file instanceof TFile) {
+        clearProcessedUrls(file.path);
+        logError("Cleared processed URL cache for deleted file: " + file.path);
+      }
  
-      if (!file ||
-        !(file instanceof TFile) ||
-        !(this.ExemplaryOfMD(file.path)) ||
-        !this.settings.removeMediaFolder ||
-        this.settings.saveAttE != "nextToNoteS") {
-        return
+      if (!file || !(file instanceof TFile)) {
+        return;
       }
 
+      // Continue with existing media folder removal logic
+      if (!(this.ExemplaryOfMD(file.path)) ||
+          !this.settings.removeMediaFolder ||
+          this.settings.saveAttE != "nextToNoteS") {
+        return;
+      }
 
       let rootdir = this.settings.mediaRootDir
       const useSysTrash = (this.app.vault.getConfig("trashOption") === "system")
@@ -488,13 +509,12 @@ export default class LocalImagesPlugin extends Plugin {
           if (!this.noteModified.includes(file)) {
             this.noteModified.push(file)
           }
-          this.setupNewMdFilesProcInterval()
+          // Removed call to setupNewMdFilesProcInterval() to prevent redundant timer resets
         }
-
-
       }
-
     })
+
+
 
 
 
@@ -551,92 +571,117 @@ export default class LocalImagesPlugin extends Plugin {
 
 
   private async processPage(file: TFile, defaultdir: boolean = false): Promise<any> {
-    
-    if (file == null ) {return null}
+    if (!file) { return null; }
 
-    // Check if this file should be skipped due to recent processing
-    if (this.skipProcessingForPaths.has(file.path)) {
-      logError(`Skipping automatic processing for recently handled file: ${file.path}`);
+    // Check if already processing this file
+    if (this.currentlyProcessing.has(file.path)) {
+      logError(`Skipping processPage for ${file.path} as it's already in progress.`);
       return null;
     }
 
-    // Get the current counter for this note (without resetting it)
-    const currentCounter = this.getCounter(file.path);
-    logError(`Processing note: ${file.path} (basename: ${file.basename})`);
-    logError(`Current counter for note: ${file.path} is ${currentCounter}`);
-
-    const content = await this.app.vault.cachedRead(file)
-    if (content.length == 0) {return null}
-    
-    logError(`Content length: ${content.length}`);
-    logError(`Content preview: ${content.substring(0, 100)}...`);
-    
-    // Define a consolidated regex pattern for markdown image links
-    const CONSOLIDATED_MD_PATTERN = /\!\[(?<anchor>([^\]]*?))\]\((?<link>((http(s){0,1}|(data\:.+?base64\,)|(file\:\/)).+?))\)/gm;
-    
-    // Reset lastIndex to ensure consistent matching
-    CONSOLIDATED_MD_PATTERN.lastIndex = 0;
-    
-    // Log the test result for the consolidated pattern
-    logError(`Consolidated pattern test result: ${CONSOLIDATED_MD_PATTERN.test(content)}`);
-    
-    // Reset lastIndex again after testing
-    CONSOLIDATED_MD_PATTERN.lastIndex = 0;
-    
-    const fixedContent = await replaceAsync(
-      content,
-      CONSOLIDATED_MD_PATTERN,
-      imageTagProcessor(this,
-        file,
-        this.settings,
-        defaultdir,
-        file.path // Pass the file path to ensure file-specific URL deduplication
-      )
-    )
-
-
-
-
-    if (content != fixedContent[0] && fixedContent[1] === false) {
-      this.modifiedQueue.remove(file)
-      await this.app.vault.modify(file, fixedContent[0])
-
-      fixedContent[2].forEach((element: string) => {
-        this.newfCreatedByDownloader.push(element)
-      })
-
-      showBalloon(`Attachments for "${file.path}" were processed.`, this.settings.showNotifications)
-
-    }
-
-    else if (content != fixedContent[0] && fixedContent[1] === true) {
-
-      this.modifiedQueue.remove(file)
-      await this.app.vault.modify(file, fixedContent[0])
-
-      fixedContent[2].forEach((element: string) => {
-        this.newfCreatedByDownloader.push(element)
-      })
-
-      showBalloon(`WARNING!\r\nAttachments for "${file.path}" were processed, but some attachments were not downloaded/replaced...`, this.settings.showNotifications)
-    }
-    else {
-      if (this.settings.showNotifications) {
-        showBalloon(`Page "${file.path}" has been processed, but nothing was changed.`, this.settings.showNotifications)
+    // Add file to processing set
+    this.currentlyProcessing.add(file.path);
+    try {
+      if (this.skipProcessingForPaths.has(file.path)) {
+        logError(`Skipping automatic processing for recently handled file: ${file.path}`);
+        return null;
       }
+
+      // Get the current counter for this note (without resetting it)
+      const currentCounter = this.getCounter(file.path);
+      logError(`Processing note: ${file.path} (basename: ${file.basename})`);
+      logError(`Current counter for note: ${file.path} is ${currentCounter}`);
+
+      const content = await this.app.vault.cachedRead(file);
+      if (!content || content.length === 0) {
+        logError(`Skipping ${file.path}: Empty content.`);
+        return null;
+      }
+      
+      logError(`Content length: ${content.length}`);
+      logError(`Content preview: ${content.substring(0, 100)}...`);
+      
+      // Define a consolidated regex pattern for markdown image links
+      const CONSOLIDATED_MD_PATTERN = /\!\[(?<anchor>([^\]]*?))\]\((?<link>((http(s){0,1}|(data\:.+?base64\,)|(file\:\/)).+?))\)/gm;
+      
+      // Reset lastIndex to ensure consistent matching
+      CONSOLIDATED_MD_PATTERN.lastIndex = 0;
+      
+      // Log the test result for the consolidated pattern
+      logError(`Consolidated pattern test result: ${CONSOLIDATED_MD_PATTERN.test(content)}`);
+      
+      // Reset lastIndex again after testing
+      CONSOLIDATED_MD_PATTERN.lastIndex = 0;
+      
+      // Pass the file path to imageTagProcessor to ensure file-specific URL tracking
+      logError(`Using file-specific URL tracking for: ${file.path}`);
+      const fixedContent = await replaceAsync(
+        content,
+        CONSOLIDATED_MD_PATTERN,
+        imageTagProcessor(this,
+          file,
+          this.settings,
+          defaultdir,
+          file.path // Pass the file path to ensure file-specific URL deduplication
+        )
+      );
+
+      const hasSuccessfulReplacements = fixedContent[2] && fixedContent[2].length > 0;
+      const contentChanged = content !== fixedContent[0];
+
+      if (contentChanged && fixedContent[1] === false) {
+        logError(`Modifying note: ${file.path}`);
+        this.modifiedQueue.remove(file);
+        await this.app.vault.modify(file, fixedContent[0]);
+
+        fixedContent[2].forEach((element: string) => {
+          if (element) this.newfCreatedByDownloader.push(element);
+        });
+
+        showBalloon(`Attachments for "${file.path}" were processed.`, this.settings.showNotifications);
+      } else if (contentChanged && fixedContent[1] === true) {
+        logError(`Note ${file.path} has warnings after processing.`);
+        this.modifiedQueue.remove(file);
+        await this.app.vault.modify(file, fixedContent[0]);
+
+        fixedContent[2].forEach((element: string) => {
+          if (element) this.newfCreatedByDownloader.push(element);
+        });
+
+        showBalloon(`WARNING!\r\nAttachments for "${file.path}" were processed, but some attachments were not downloaded/replaced...`, this.settings.showNotifications);
+      } else {
+        logError(`Page "${file.path}" processed, but content unchanged.`);
+        if (this.settings.showNotifications) {
+          showBalloon(`Page "${file.path}" has been processed, but nothing was changed.`, this.settings.showNotifications);
+        }
+      }
+      return null;
+    } catch (e) {
+      logError(`Error during processPage for ${file.path}: ${e}`, true);
+    } finally {
+      this.currentlyProcessing.delete(file.path);
+      logError(`Finished processPage for ${file.path}. Removed from currentlyProcessing.`);
     }
+    return null;
   }
 
   // using arrow syntax for callbacks to correctly pass this context
 
   processActivePage = (defaultdir: boolean = false) => async () => {
-    logError("processActivePage")
+    logError("processActivePage");
     try {
-      const activeFile = this.getCurrentNote()
-      await this.processPage(activeFile, defaultdir)
+      const activeFile = this.getCurrentNote();
+      if (activeFile) {
+        this.resetCounter(activeFile.path);
+        logError(`Reset counter for manual run: ${activeFile.path}`);
+        await this.processPage(activeFile, defaultdir);
+      } else {
+        showBalloon("Cannot get current note.", this.settings.showNotifications);
+      }
     } catch (e) {
-      showBalloon(`Please select a note or click inside selected note in canvas.`, this.settings.showNotifications)
-      return
+      logError(`Error in processActivePage: ${e}`);
+      showBalloon(`Please select a note or click inside selected note in canvas.`, this.settings.showNotifications);
+      return;
     }
   }
 
@@ -654,12 +699,16 @@ export default class LocalImagesPlugin extends Plugin {
 
     for (const [index, file] of files.entries()) {
       if (this.ExemplaryOfMD(file.path)) {
+        this.resetCounter(file.path);
+        logError(`Reset counter for batch run: ${file.path}`);
         if (notice) {
           //setMessage() is undeclared but factically existing, so ignore the TS error  //@ts-expect-error
           notice.setMessage(
             APP_TITLE + `\nProcessing \n"${file.path}" \nPage ${index} of ${pagesCount}`
           )
         }
+        this.resetCounter(file.path);
+        logError(`Reset counter for batch run: ${file.path}`);
         await this.processPage(file)
       }
     }
@@ -1168,9 +1217,6 @@ export default class LocalImagesPlugin extends Plugin {
           showBalloon("No orphaned files found!", this.settings.showNotifications)
         }
 
-
-
-
       }
 
 
@@ -1204,7 +1250,7 @@ export default class LocalImagesPlugin extends Plugin {
 
     }
 
-
+  
 
 
   private openProcessAllModal = () => {
@@ -1219,8 +1265,6 @@ export default class LocalImagesPlugin extends Plugin {
 
 
   private async onMdCreateFunc(file: TFile) {
-
- 
     if (!file ||
       !(file instanceof TFile) ||
       !(this.settings.processCreated) ||
@@ -1228,6 +1272,18 @@ export default class LocalImagesPlugin extends Plugin {
        )
       return
 
+    // Regenerate session ID for new file and pass plugin instance to clear app.processedFiles
+    regenerateSessionId(this);
+    logError(`Generated new session ID for newly created file: ${file.path}`);
+    
+    // Explicitly clear the processed URLs cache for this file
+    // This ensures that when a note is recreated, stale URL entries do not persist
+    clearProcessedUrls(file.path);
+    logError("Cleared URL cache for newly created file: " + file.path);
+    
+    // Reset counter for this new file
+    this.resetCounter(file.path);
+    logError(`Reset counter for newly created file: ${file.path}`);
 
     const timeGapMs = Math.abs(Date.now() - file.stat.ctime)
 
@@ -1237,15 +1293,26 @@ export default class LocalImagesPlugin extends Plugin {
     logError("func onMdCreateFunc: " + file.path)
     logError(file,true)
  
-
     var cont = await this.app.vault.cachedRead(file)
- 
     logError(cont)
-  
-        this.enqueueActivePage(file)
-        this.setupQueueInterval()
-        this.setupNewMdFilesProcInterval()
- 
+    
+    // Enqueue for processing first
+    this.enqueueActivePage(file)
+    this.setupQueueInterval()
+    
+    if (this.settings.processAll) {
+      if (!this.noteModified.includes(file)) {
+        this.noteModified.push(file);
+      }
+      this.setupNewMdFilesProcInterval();
+    }
+    
+    // Add to skip list AFTER a longer delay to ensure processing has time to complete
+    setTimeout(() => {
+      this.skipProcessingForPaths.add(file.path);
+      this.schedulePathForSkipProcessingCleanup(file.path);
+      logError(`Added to skipProcessingForPaths after processing: ${file.path}`);
+    }, 5000);
   }
 
   private async onFCreateFunc(file: TFile) {
@@ -1429,6 +1496,10 @@ export default class LocalImagesPlugin extends Plugin {
       const useMdLinks = this.app.vault.getConfig("useMarkdownLinks")
 
       for (let note of this.noteModified) {
+        // Clear the processed URLs for this note before processing
+        // This ensures that URLs are reprocessed for modified notes
+        clearProcessedUrls(note.path);
+        logError(`Cleared URL cache for modified note: ${note.path}`);
 
         const metaCache = this.app.metadataCache.getFileCache(note)
         let filedata = await this.app.vault.cachedRead(note)
@@ -1464,15 +1535,16 @@ export default class LocalImagesPlugin extends Plugin {
 
           await this.ensureFolderExists(mdir)
 
-          for (let el of embeds) {
+          // Ensure safe iteration over embeds
+          if (embeds && Array.isArray(embeds)) {
+            for (let el of embeds) {
+              logError(el)
 
-            logError(el)
+              let oldpath = pathJoin([obsmdir, path.basename(el.link)])
+              let oldtag = el["original"];
+              logError(useMdLinks)
 
-            let oldpath = pathJoin([obsmdir, path.basename(el.link)])
-            let oldtag = el["original"];
-            logError(useMdLinks)
-
-            logError(this.newfCreated)
+              logError(this.newfCreated)
             
             // Check both skipProcessingForPaths and processedPastedFiles at the beginning
             // to ensure we don't process files that are already handled
