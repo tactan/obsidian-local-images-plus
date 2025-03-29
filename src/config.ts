@@ -92,7 +92,8 @@ export interface ISettings {
   convertWebpForWebImages: boolean,
   convertWebpForPastedImages: boolean,
   webpQuality: number,
-  imageRenameRule: string
+  imageRenameRule: string,
+  skipWebPConversionFormats: string
 }
 
 export const DEFAULT_SETTINGS: ISettings = {
@@ -124,5 +125,6 @@ export const DEFAULT_SETTINGS: ISettings = {
   convertWebpForWebImages: false,
   convertWebpForPastedImages: false,
   webpQuality: 80,
-  imageRenameRule: '{notename}-{counter:001}'
+  imageRenameRule: '{notename}-{counter:001}',
+  skipWebPConversionFormats: "gif"
 };

@@ -72,6 +72,30 @@ export default class LocalImagesPlugin extends Plugin {
   skipProcessingForPaths: Set<string> = new Set() // Track paths that should be skipped in automatic processing
   skipProcessingTimeout: number = 30000 // Default timeout (30 seconds) for removing paths from skip list
   currentlyProcessing = new Set<string>() // Track notes that are currently being processed
+  
+  // Helper function to compare two ArrayBuffers for equality
+  private async _areArrayBuffersEqual(buf1: ArrayBuffer, buf2: ArrayBuffer): Promise<boolean> {
+    if (!buf1 || !buf2 || buf1.byteLength !== buf2.byteLength) return false;
+    const dv1 = new Int8Array(buf1);
+    const dv2 = new Int8Array(buf2);
+    for (let i = 0; i < buf1.byteLength; i++) {
+      if (dv1[i] !== dv2[i]) return false;
+    }
+    return true;
+  }
+
+  // Helper function to get MIME type from an ArrayBuffer
+  private async _getMimeFromArrayBuffer(buffer: ArrayBuffer): Promise<string | null> {
+    if (!buffer || buffer.byteLength === 0) return null;
+    try {
+      const { fromBuffer } = await import('file-type');
+      const fileTypeResult = await fromBuffer(buffer);
+      return fileTypeResult ? fileTypeResult.mime : null;
+    } catch (e) {
+      logError(`Error getting MIME type from buffer: ${e}`);
+      return null;
+    }
+  }
 
   // Returns the next counter for a given noteId; if not initialized, sets it to 1
   private getNextCounter(noteId: string): number {
@@ -201,20 +225,52 @@ export default class LocalImagesPlugin extends Plugin {
       if (this.settings.convertWebpForPastedImages) {
         logError(`handleMarkdownImageLink: WebP conversion enabled, attempting conversion...`);
         
-        // Skip conversion for SVG files
+        // Parse formats to skip from settings
+        const formatsToSkip = this.settings.skipWebPConversionFormats
+          ? this.settings.skipWebPConversionFormats
+              .split('|')
+              .map(ext => ext.trim().toLowerCase())
+              .filter(ext => ext.length > 0)
+          : [];
+        
+        // Check if current format should be skipped
+        const currentFormat = finalExtension.toLowerCase();
+        const shouldSkipConversion = formatsToSkip.includes(currentFormat);
+        
+        // Skip conversion for SVG files or formats in skip list
         if (finalMimeType === 'image/svg+xml') {
           logError(`handleMarkdownImageLink: Skipping WebP conversion for SVG file`);
+        } else if (shouldSkipConversion) {
+          logError(`handleMarkdownImageLink: Skipping WebP conversion for ${currentFormat} file (in skip list)`);
         } else {
           try {
             const mimeTypeForConversion = finalMimeType || 'image/png';
-            const webpData = await convertToWebp(arrayBuffer, mimeTypeForConversion, this.settings.webpQuality);
+            const webpData = await convertToWebp(
+              arrayBuffer, 
+              mimeTypeForConversion, 
+              this.settings.webpQuality,
+              undefined,
+              formatsToSkip
+            );
             
-            if (webpData && webpData.byteLength > 0) {
-              finalData = webpData;
-              finalMimeType = 'image/webp';
-              finalExtension = 'webp';
-              webpConversionSuccessful = true;
-              logError(`handleMarkdownImageLink: WebP conversion successful`);
+            // Check if conversion actually happened by comparing buffers
+            const buffersEqual = await this._areArrayBuffersEqual(arrayBuffer, webpData);
+            
+            if (webpData && webpData.byteLength > 0 && !buffersEqual) {
+              // Get MIME type of the result to confirm it's actually webp
+              const resultMime = await this._getMimeFromArrayBuffer(webpData);
+              
+              if (resultMime === 'image/webp') {
+                finalData = webpData;
+                finalMimeType = 'image/webp';
+                finalExtension = 'webp';
+                webpConversionSuccessful = true;
+                logError(`handleMarkdownImageLink: WebP conversion successful`);
+              } else {
+                logError(`handleMarkdownImageLink: WebP conversion returned non-webp data (${resultMime}), using original format`);
+              }
+            } else if (buffersEqual) {
+              logError(`handleMarkdownImageLink: WebP conversion returned identical data, conversion was likely skipped`);
             } else {
               logError(`handleMarkdownImageLink: WebP conversion produced empty data, using original format`);
             }
@@ -1378,10 +1434,39 @@ export default class LocalImagesPlugin extends Plugin {
           logError(`Error getting image dimensions for ${file.path}: ${error}`);
         }
         
+        // Parse formats to skip from settings
+        const formatsToSkip = this.settings.skipWebPConversionFormats
+          ? this.settings.skipWebPConversionFormats
+              .split('|')
+              .map(ext => ext.trim().toLowerCase())
+              .filter(ext => ext.length > 0)
+          : [];
+        
+        // Check if current format should be skipped
+        const shouldSkipConversion = formatsToSkip.includes(fileExt);
+        
+        if (shouldSkipConversion) {
+          logError(`Skipping WebP conversion for ${file.path} (format ${fileExt} in skip list)`);
+          return; // Skip processing entirely
+        }
+        
         // Convert to WebP
         logError(`Converting ${file.path} to WebP...`);
         const mimeType = `image/${fileExt === 'jpg' ? 'jpeg' : fileExt}`;
-        const webpData = await convertToWebp(originalData, mimeType, this.settings.webpQuality);
+        const webpData = await convertToWebp(
+          originalData, 
+          mimeType, 
+          this.settings.webpQuality,
+          undefined,
+          formatsToSkip
+        );
+        
+        // Check if conversion actually happened by comparing buffers
+        const buffersEqual = await this._areArrayBuffersEqual(originalData, webpData);
+        if (buffersEqual) {
+          logError(`WebP conversion for ${file.path} returned identical data, conversion was likely skipped`);
+          return; // Skip further processing if conversion didn't actually happen
+        }
         
         // Generate new filename with WebP extension
         const originalFileName = path.basename(file.path);

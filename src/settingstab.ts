@@ -539,6 +539,19 @@ export default class SettingTab extends PluginSettingTab {
                     })
             )
 
+            new Setting(containerEl)
+            .setName("Skip WebP conversion for formats")
+            .setDesc("List image extensions to skip WebP conversion, separated by pipe |. Example: gif|svg")
+            .addText((text) =>
+                text
+                    .setValue(this.plugin.settings.skipWebPConversionFormats)
+                    .setPlaceholder("e.g., gif|svg")
+                    .onChange(async (value) => {
+                        this.plugin.settings.skipWebPConversionFormats = value;
+                        await this.plugin.saveSettings();
+                    })
+            )
+
             containerEl.createEl("h3", { text: "Image Renaming" })
 
             new Setting(containerEl)

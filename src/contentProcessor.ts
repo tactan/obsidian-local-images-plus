@@ -295,15 +295,37 @@ export function imageTagProcessor(app: Plugin,
       else if (fileExt === 'bmp') mimeType = 'image/bmp';
       else if (fileExt === 'jpg' || fileExt === 'jpeg') mimeType = 'image/jpeg';
       
-      // Only convert supported mime types
-      if (supportedMimeTypes.includes(mimeType)) {
+      // Parse the skip conversion formats from settings
+      const formatsToSkip = settings.skipWebPConversionFormats
+        .split('|')
+        .map(ext => ext.trim().toLowerCase())
+        .filter(ext => ext.length > 0);
+      
+      // Extract extension from URL
+      const urlExt = link.split('.').pop()?.toLowerCase() || '';
+      
+      // Check if either detected extension or URL extension is in the skip list
+      const shouldSkipBasedOnExt = formatsToSkip.includes(fileExt.toLowerCase()) || 
+                                  (urlExt && formatsToSkip.includes(urlExt));
+      
+      logError("Formats to skip WebP conversion: " + formatsToSkip.join(', '), false);
+      logError("URL extension: " + urlExt + ", File extension: " + fileExt + ", Should skip: " + shouldSkipBasedOnExt, false);
+      
+      // Only convert supported mime types and if not in skip list
+      if (supportedMimeTypes.includes(mimeType) && !shouldSkipBasedOnExt) {
         try {
           logError("Converting to WebP: " + mimeType + " for link: " + link, false);
-          // Convert to WebP using the imported function
-          fileData = await convertToWebp(fileData, mimeType, settings.webpQuality);
-          // Update file extension to webp
-          fileExt = 'webp';
-          logError("WebP conversion successful for: " + link, false);
+          // Convert to WebP using the imported function, passing the formats to skip
+          fileData = await convertToWebp(fileData, mimeType, settings.webpQuality, link, formatsToSkip);
+          
+          // Check if conversion actually occurred by examining the file extension again
+          const finalFileExt = await getFileExt(fileData, parsedUrl.pathname);
+          if (finalFileExt === 'webp') {
+            fileExt = 'webp';
+            logError("WebP conversion successful for: " + link, false);
+          } else {
+            logError("WebP conversion skipped due to format exclusion: " + mimeType, false);
+          }
         } catch (error) {
           logError("WebP conversion failed: " + error, false);
           // Continue with original file if conversion fails
@@ -595,12 +617,8 @@ async function chooseFileName(
     const newName = renameImage(linkBaseName, settings.imageRenameRule, noteName, counter, imgWidth, imgHeight, targetExt);
     logError("Generated new name: " + newName, false);
     
-    // If targetExt is defined, the extension is already included in newName
-    if (targetExt) {
-      suggestedName = pathJoin([dir, cleanFileName(newName)]);
-    } else {
-      suggestedName = pathJoin([dir, cleanFileName(`${newName}.${fileExt}`)]);
-    }
+    // The renameImage function already includes the extension, so don't append it again
+    suggestedName = pathJoin([dir, cleanFileName(newName)]);
   } else if (!settings.useMD5ForNewAtt) {
     // Use a simple counter-based name if no rename rule and not using MD5
     const extensionToUse = targetExt || fileExt;
@@ -785,12 +803,36 @@ export async function handleMarkdownImageLink(
       else if (fileExt === 'bmp') mimeType = 'image/bmp';
       else if (fileExt === 'jpg' || fileExt === 'jpeg') mimeType = 'image/jpeg';
       
-      if (supportedMimeTypes.includes(mimeType)) {
+      // Parse the skip conversion formats from settings
+      const formatsToSkip = settings.skipWebPConversionFormats
+        .split('|')
+        .map(ext => ext.trim().toLowerCase())
+        .filter(ext => ext.length > 0);
+      
+      // Extract extension from URL
+      const urlExt = link.split('.').pop()?.toLowerCase() || '';
+      
+      // Check if either detected extension or URL extension is in the skip list
+      const shouldSkipBasedOnExt = formatsToSkip.includes(fileExt.toLowerCase()) || 
+                                  (urlExt && formatsToSkip.includes(urlExt));
+      
+      logError(`Formats to skip WebP conversion: ${formatsToSkip.join(', ')}`, false);
+      logError(`URL extension: ${urlExt}, File extension: ${fileExt}, Should skip: ${shouldSkipBasedOnExt}`, false);
+      
+      if (supportedMimeTypes.includes(mimeType) && !shouldSkipBasedOnExt) {
         try {
           logError(`Converting to WebP: ${mimeType} for link: ${link}`, false);
-          fileData = await convertToWebp(fileData, mimeType, settings.webpQuality);
-          fileExt = 'webp';
-          logError(`WebP conversion successful for: ${link}`, false);
+          // Pass the formats to skip to the convertToWebp function
+          fileData = await convertToWebp(fileData, mimeType, settings.webpQuality, link, formatsToSkip);
+          
+          // Check if conversion actually occurred by examining the file extension again
+          const finalFileExt = await getFileExt(fileData, parsedUrl.pathname);
+          if (finalFileExt === 'webp') {
+            fileExt = 'webp';
+            logError(`WebP conversion successful for: ${link}`, false);
+          } else {
+            logError(`WebP conversion skipped due to format exclusion: ${mimeType}`, false);
+          }
         } catch (error) {
           logError(`WebP conversion failed: ${error}`, false);
         }

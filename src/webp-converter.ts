@@ -46,11 +46,26 @@ export const convertToWebp = async (
     imageData: ArrayBuffer, 
     mimeType: string, 
     quality: number,
-    sourceUrl?: string
+    sourceUrl?: string,
+    skipFormats: string[] = []
 ): Promise<ArrayBuffer> => {
     // Check if this URL has already been processed
     if (sourceUrl && convertedUrls.has(sourceUrl)) {
         console.log(`WebP conversion skipped: URL already processed: ${sourceUrl}`);
+        return imageData; // Return original data without converting
+    }
+    
+    // Check if the mime type is in the skip formats list
+    const normalizedSkipFormats = skipFormats.map(format => format.toLowerCase().trim());
+    if (normalizedSkipFormats.includes(mimeType.toLowerCase())) {
+        console.log(`WebP conversion skipped: MIME type ${mimeType} is in the skip formats list`);
+        return imageData; // Return original data without converting
+    }
+    
+    // Extract the simple MIME format and check if it's in the skip list
+    const simpleMimeFormat = mimeType.split('/').pop()?.toLowerCase();
+    if (simpleMimeFormat && normalizedSkipFormats.includes(simpleMimeFormat)) {
+        console.log(`WebP conversion skipped internally: Format ${simpleMimeFormat} is in the skip list [${normalizedSkipFormats.join(', ')}]`);
         return imageData; // Return original data without converting
     }
     // Validate input parameters
@@ -72,6 +87,13 @@ export const convertToWebp = async (
     const supportedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/bmp', 'image/avif'];
     if (!supportedMimeTypes.includes(normalizedMimeType)) {
         throw new Error(`Unsupported image format: ${normalizedMimeType}. Only JPEG, PNG, GIF, BMP, and AVIF are supported for WebP conversion.`);
+    }
+    
+    // Check if the mime type is in the skip formats list using the normalized mime type
+    // This is a second check using the normalized mime type
+    if (normalizedSkipFormats.some(format => normalizedMimeType.includes(format))) {
+        console.log(`WebP conversion skipped: Normalized MIME type ${normalizedMimeType} matches a format in the skip list`);
+        return imageData; // Return original data without converting
     }
     
     // Normalize quality parameter
