@@ -924,28 +924,18 @@ export default class LocalImagesPlugin extends Plugin {
           // Handle the markdown link insertion
           if (editor) {
             const markdownLink = `![[${newlink[0]}]]`;
-            // Flag to control whether we should insert a new markdown link
-            let shouldInsertMarkdownLink = true;
+            const originalMarkdownLink = `![[${file.name}]]`;
+            logError(`[${fileId}] Attempting to replace original link: ${originalMarkdownLink} with new link: ${markdownLink}`);
             
-            // If WebP conversion was successful, we need to replace the original link
-            // instead of just inserting a new one
-            if (webpConversionSuccessful) {
-              logError(`[${fileId}] WebP conversion successful, attempting to replace original link`);
+            // Always attempt to replace the original link, regardless of WebP conversion status
+            const replacementSuccessful = this.replaceImageLinkInEditor(editor, originalMarkdownLink, markdownLink);
+            
+            if (replacementSuccessful) {
+              logError(`[${fileId}] Successfully replaced original link with new link.`);
               
-              // Try to find and replace the original link in the editor
-              // The original file might be created by the time we get here
-              const originalFilePath = pathJoin([mdir, file.name]);
-              const originalMarkdownLink = `![[${file.name}]]`;
-              
-              // Try to replace the original link with the WebP link BEFORE inserting a new one
-              const replacementSuccessful = this.replaceImageLinkInEditor(editor, originalMarkdownLink, markdownLink);
-              
-              if (replacementSuccessful) {
-                // If replacement was successful, we don't need to insert a new link
-                shouldInsertMarkdownLink = false;
-                logError(`[${fileId}] Successfully replaced original link with WebP link. No new link needed.`);
-                
-                // Schedule a delayed deletion of the original file to prevent race conditions
+              // Schedule deletion of the original file if WebP conversion was successful
+              if (webpConversionSuccessful) {
+                const originalFilePath = pathJoin([mdir, file.name]);
                 setTimeout(async () => {
                   try {
                     if (await this.app.vault.adapter.exists(originalFilePath)) {
@@ -956,13 +946,10 @@ export default class LocalImagesPlugin extends Plugin {
                     logError(`[${fileId}] Error deleting original file: ${error}`);
                   }
                 }, 500); // 500ms delay to ensure file operations have completed
-              } else {
-                logError(`[${fileId}] Could not find original link to replace, will insert new link`);
               }
-            }
-            
-            // Only insert a new link if we couldn't replace the original one
-            if (shouldInsertMarkdownLink) {
+            } else {
+              // If replacement failed, insert a new link at cursor position
+              logError(`[${fileId}] Could not find original link to replace, inserting new link at cursor.`);
               editor.replaceSelection(markdownLink);
               logError(`[${fileId}] Inserted new markdown link: ${markdownLink}`);
             }
