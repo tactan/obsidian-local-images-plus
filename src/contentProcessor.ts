@@ -613,6 +613,12 @@ async function chooseFileName(
     suggestedName = pathJoin([dir, cleanFileName(`${baseName}.${extensionToUse}`)]);
   }
   
+  // Ensure we have a baseName for MD5 comparison, even when using imageRenameRule
+  if (!baseName) {
+    baseName = md5Sig(contentData);
+    logError(`Computed MD5 signature for content: ${baseName}`, false);
+  }
+  
   logError(`Generated baseName: ${baseName}, Extension: ${fileExt}`, false);
     if (await adapter.exists(suggestedName, false)) {
       const fileData = await adapter.readBinary(suggestedName);

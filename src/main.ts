@@ -33,7 +33,8 @@ import {
   blobToJpegArrayBuffer,
   getFileExt,
   readFromDiskB,
-  getImageDimensions
+  getImageDimensions,
+  downloadImage
 } from "./utils"
 
 import {
@@ -120,23 +121,13 @@ export default class LocalImagesPlugin extends Plugin {
     logError(`handleMarkdownImageLink: Found Markdown image link: ${imageUrl} with alt text: ${altText}`);
     
     try {
-      // Fetch with custom user-agent to avoid being blocked by some servers
-      const response = await fetch(imageUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-      });
+      // Use downloadImage function from utils.ts instead of direct fetch
+      // This handles anti-leeching and CORS issues with proper headers and fallback mechanisms
+      const arrayBuffer = await downloadImage(imageUrl);
       
-      if (!response.ok) {
-        logError(`handleMarkdownImageLink: Failed to download image from ${imageUrl} - Status: ${response.status}`);
-        showBalloon(`Failed to download image: ${response.statusText}`, this.settings.showNotifications);
-        return;
-      }
-      
-      const arrayBuffer = await response.arrayBuffer();
       if (!arrayBuffer || arrayBuffer.byteLength === 0) {
-        logError(`handleMarkdownImageLink: Downloaded empty image from ${imageUrl}`);
-        showBalloon(`Downloaded image is empty`, this.settings.showNotifications);
+        logError(`handleMarkdownImageLink: Failed to download image from ${imageUrl}`);
+        showBalloon(`Failed to download image`, this.settings.showNotifications);
         return;
       }
       
@@ -158,48 +149,45 @@ export default class LocalImagesPlugin extends Plugin {
       
       // Normalize MIME type
       let finalData = arrayBuffer;
-      let finalMimeType = response.headers.get("content-type") || '';
+      let finalMimeType = '';
       
-      // Handle missing or incorrect MIME types
-      if (!finalMimeType || finalMimeType === 'application/octet-stream') {
-        // Try to determine MIME type from URL extension
-        const urlExt = imageUrl.split('.').pop().toLowerCase();
-        if (urlExt) {
-          switch (urlExt) {
-            case 'jpg':
-            case 'jpeg':
-              finalMimeType = 'image/jpeg';
-              break;
-            case 'png':
-              finalMimeType = 'image/png';
-              break;
-            case 'gif':
-              finalMimeType = 'image/gif';
-              break;
-            case 'webp':
-              finalMimeType = 'image/webp';
-              break;
-            case 'svg':
-              finalMimeType = 'image/svg+xml';
-              break;
-            case 'avif':
-              finalMimeType = 'image/avif';
-              break;
-            case 'tiff':
-            case 'tif':
-              finalMimeType = 'image/tiff';
-              break;
-            case 'ico':
-              finalMimeType = 'image/x-icon';
-              break;
-            default:
-              finalMimeType = 'image/png'; // Default fallback
-          }
-        } else {
-          finalMimeType = 'image/png'; // Default fallback
+      // Try to determine MIME type from URL extension
+      const urlExt = imageUrl.split('.').pop().toLowerCase();
+      if (urlExt) {
+        switch (urlExt) {
+          case 'jpg':
+          case 'jpeg':
+            finalMimeType = 'image/jpeg';
+            break;
+          case 'png':
+            finalMimeType = 'image/png';
+            break;
+          case 'gif':
+            finalMimeType = 'image/gif';
+            break;
+          case 'webp':
+            finalMimeType = 'image/webp';
+            break;
+          case 'svg':
+            finalMimeType = 'image/svg+xml';
+            break;
+          case 'avif':
+            finalMimeType = 'image/avif';
+            break;
+          case 'tiff':
+          case 'tif':
+            finalMimeType = 'image/tiff';
+            break;
+          case 'ico':
+            finalMimeType = 'image/x-icon';
+            break;
+          default:
+            finalMimeType = 'image/png'; // Default fallback
         }
-        logError(`handleMarkdownImageLink: Determined MIME type from URL: ${finalMimeType}`);
+      } else {
+        finalMimeType = 'image/png'; // Default fallback
       }
+      logError(`handleMarkdownImageLink: Determined MIME type from URL: ${finalMimeType}`);
       
       // Extract extension from MIME type
       let finalExtension = finalMimeType.split("/")[1] || 'png';
@@ -290,8 +278,9 @@ export default class LocalImagesPlugin extends Plugin {
       // Get relative path for markdown replacement
       const newlink = await getRDir(activeFile, this.settings, finalPath);
       
-      // Create markdown link with original alt text
-      const markdownLink = `![[${newlink[0]}|${altText}]]`;
+      // For pasted markdown image links, we intentionally drop the alt text to create a simple wikilink
+      // This ensures consistency with Obsidian's standard format for local images
+      const markdownLink = `![[${newlink[0]}]]`;
       
       // Replace the markdown link in the editor with the new local link
       const content = editor.getValue();

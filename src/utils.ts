@@ -306,9 +306,31 @@ export async function downloadImage(url: string): Promise<ArrayBuffer> {
     return res.arrayBuffer;
   }
   catch (e) {
-
-    logError("Cannot download the file: " + e, false);
-    return null;
+    // Log the initial error
+    logError("Initial download attempt failed: " + e, false);
+    
+    // Fallback mechanism: Try again with a Referer header
+    try {
+      // Extract the origin from the URL to use as Referer
+      const origin = new URL(url).origin;
+      
+      // Create new headers with both User-Agent and Referer
+      const fallbackHeaders = {
+        'method': 'GET',
+        'User-Agent': USER_AGENT,
+        'Referer': origin // Add Referer header to bypass anti-leeching protections
+      }
+      
+      logError("Attempting fallback download with Referer: " + origin, false);
+      const fallbackRes = await requestUrl({ url: url, headers: fallbackHeaders });
+      logError("Fallback download successful", false);
+      return fallbackRes.arrayBuffer;
+    }
+    catch (fallbackError) {
+      // If fallback also fails, log the error and return null
+      logError("Fallback download also failed: " + fallbackError, false);
+      return null;
+    }
   }
 }
 

@@ -68,9 +68,10 @@ export const convertToWebp = async (
     }
     
     // Check if the mime type is supported
-    const supportedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/bmp'];
+    // AVIF format is now supported based on the browser's ability to process AVIF images via canvas
+    const supportedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/bmp', 'image/avif'];
     if (!supportedMimeTypes.includes(normalizedMimeType)) {
-        throw new Error(`Unsupported image format: ${normalizedMimeType}. Only JPEG, PNG, GIF, and BMP are supported for WebP conversion.`);
+        throw new Error(`Unsupported image format: ${normalizedMimeType}. Only JPEG, PNG, GIF, BMP, and AVIF are supported for WebP conversion.`);
     }
     
     // Normalize quality parameter
