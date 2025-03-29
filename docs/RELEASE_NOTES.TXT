@@ -1,3 +1,10 @@
+0.17.1-beta.1
+Added support for downloading online images with anti-hotlinking mechanisms.  
+Added support for downloading online images with cross-origin issues (e.g., directly pasting Markdown image links that result in CORS errors).  
+Added the ability to skip specified image formats (e.g., GIF) during WebP conversion.  
+Fixed the issue of format conversion and renaming when adding the same note again after deleting a clipped note.  
+Fixed the issue where pasted webpage images or Markdown image links sometimes fail to convert formats.
+
 0.17.0-beta.2
 Fix: Revised pasted image processing to properly support WebP conversion when 'Convert Images to WebP (Pasted Images)' is enabled.
 Improvements: Enhancements in image processing logic and error handling.
