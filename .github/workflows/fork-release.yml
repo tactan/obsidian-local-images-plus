@@ -31,7 +31,7 @@ jobs:
       - name: Publish fork-specific prerelease
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: 0.17.0-counter-webp.1
+          tag_name: 0.17.0-counter-webp.2
           name: Local Images Plus 0.17.0 + counter & multi-format WebP (fork)
           target_commitish: ${{ github.sha }}
           prerelease: true

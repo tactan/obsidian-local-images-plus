@@ -253,7 +253,15 @@ export function imageTagProcessor(
     }
   }
 
-  return processImageTag;
+  // Counter templates require deterministic per-note processing order.
+  // Keep the original parallel behavior for all other naming templates.
+  if (!hasCounterVariable(settings.FileNameTemplate)) return processImageTag;
+  let queue: Promise<any> = Promise.resolve();
+  return (match: any) => {
+    const current = queue.then(() => processImageTag(match));
+    queue = current.then(() => undefined, () => undefined);
+    return current;
+  };
 }
 
 export async function getRDir(
