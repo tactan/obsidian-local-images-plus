@@ -1,9 +1,13 @@
 name: Publish counter + WebP fork prerelease
 
+# Publishing requires an explicit action; ordinary pushes only run validation.
 on:
-  push:
-    branches:
-      - feature/counter-multiformat-webp
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Unique tag for this release (e.g. 0.17.0-counter-webp.4)'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -35,11 +39,12 @@ jobs:
       - name: Publish fork-specific prerelease
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: 0.17.0-counter-webp.3
+          tag_name: ${{ inputs.release_tag }}
           name: Local Images Plus Mod 0.17.0 — full-image conversion fix (.3)
           target_commitish: ${{ github.sha }}
           prerelease: true
           make_latest: false
+          fail_on_unmatched_files: true
           body: |
             Fork-specific prerelease based on upstream 0.17.0.
             Adds per-note ${counter} / ${counter:001} / ${counter:0001} numbering
