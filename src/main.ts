@@ -1494,6 +1494,7 @@ export default class LocalImagesPlugin extends Plugin {
     if (
       data &&
       typeof data.FileNameTemplate !== "string" &&
+      typeof data.imageRenameRule !== "string" &&
       typeof data.useMD5ForNewAtt === "boolean"
     ) {
       this.settings.FileNameTemplate = data.useMD5ForNewAtt
