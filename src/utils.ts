@@ -389,6 +389,8 @@ export interface FileNameCtx {
   notename?: string;
   date?: string;
   unique?: string;
+  counter?: string;
+  notepath?: string;
   [key: string]: string | undefined;
 }
 
@@ -400,6 +402,7 @@ export const NAME_TEMPLATE_VARIABLES = [
   "notename",
   "date",
   "unique",
+  "counter",
 ];
 
 //kind: "file" - result is a sanitized file name base (no extension), "path" - result is a folder path (kept as is)
@@ -414,6 +417,9 @@ export function renderNameTemplate(
       const value = ctx[name];
       if (value === undefined || value === null) {
         return match;
+      }
+      if (name === "counter" && lenStr !== undefined) {
+        return value.padStart(lenStr.length, "0");
       }
       if (lenStr !== undefined) {
         const len = parseInt(lenStr, 10);
