@@ -23,6 +23,8 @@ jobs:
       - run: npm run build
       - run: test -s obsidian_local_images_plus_latest/main.js
       - run: node --check obsidian_local_images_plus_latest/main.js
+      - run: cmp manifest.json obsidian_local_images_plus_latest/manifest.json
+      - run: test "$(node -p 'require("./manifest.json").id')" = 'obsidian-local-images-plus-tac'
       - uses: actions/upload-artifact@v4
         with:
           name: fork-counter-webp-build

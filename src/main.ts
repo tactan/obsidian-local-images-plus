@@ -57,7 +57,7 @@ import {
 import { UniqueQueue } from "./uniqueQueue";
 import path from "path";
 import moment from "moment";
-import { convertImageToWebp, nextCounterForNote, hasCounterVariable } from "./imageEnhancements";
+import { convertImageToWebp, isWebpConvertible, nextCounterForNote, hasCounterVariable } from "./imageEnhancements";
 import { ModalW1 } from "./modal";
 const fs = require("fs").promises;
 
@@ -1257,11 +1257,21 @@ export default class LocalImagesPlugin extends Plugin {
               }
 
               if (this.settings.PngToJpegLocal && this.settings.ImgCompressionType === "image/webp") {
-                newBinData = await convertImageToWebp(oldBinData, fileExt, this.settings.JpegQuality, this.settings.skipWebPConversionFormats);
-                if (newBinData) {
-                  contentHash = md5Sig(newBinData);
-                  targetExt = ".webp";
-                  readExisting = (filePath) => this.app.vault.adapter.readBinary(filePath);
+                // readFromDiskB(oldpath, 5000) is only a partial signature buffer.
+                // Never send it to the decoder: it can yield a mostly transparent image.
+                if (isWebpConvertible(fileExt, this.settings.skipWebPConversionFormats)) {
+                  const fullImageData = await this.app.vault.adapter.readBinary(oldpath);
+                  newBinData = await convertImageToWebp(
+                    fullImageData,
+                    fileExt,
+                    this.settings.JpegQuality,
+                    this.settings.skipWebPConversionFormats
+                  );
+                  if (newBinData) {
+                    contentHash = md5Sig(newBinData);
+                    targetExt = ".webp";
+                    readExisting = (filePath) => this.app.vault.adapter.readBinary(filePath);
+                  }
                 }
               } else if (this.settings.PngToJpegLocal && fileExt == "png") {
                 const compExt =

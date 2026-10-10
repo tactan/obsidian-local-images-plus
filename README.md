@@ -155,3 +155,15 @@ The maintained fork branch `feature/counter-multiformat-webp` builds on the upst
 - **Safety:** back up the vault and plugin `data.json` before enabling bulk note processing. Do not run both the old fork and this fork under different plugin directories; both have the same plugin ID.
 - **Tests:** `npm ci && node --test tests/*.test.cjs && npm run build`. The build uses the existing Rollup pipeline.
 
+
+## 2026-10-10: full-image data regression fix (.3)
+
+Local pasted PNG / JPEG / AVIF conversions must use the complete attachment bytes from `vault.adapter.readBinary(path)`, not the original 5,000-byte prefix returned by `readFromDiskB(path, 5000)` (which remains used for the upstream signature logic). The latter can decode into transparent/cropped images even though the resulting WebP container is formally valid. Regression assertions cover this exact failure.
+
+This fork's plugin ID is `obsidian-local-images-plus-tac` and its display name is `Local Images Plus Mod` (per local user manifest). Install as `.obsidian/plugins/obsidian-local-images-plus-tac/{main.js,manifest.json,styles.css}`. This separate ID allows the plugin to coexist with the original but **do not enable both processors simultaneously**, or they may rename the same attachments twice. Copy the old `data.json` into the new directory only while Obsidian is closed; settings from the previous custom fork are accepted.
+
+The in-memory counter increments monotonically during one plugin session; deleting an embed/image does not decrement it. After a restart, new initial values are computed from filenames in the attachment destination, not from the currently embedded links. This avoids immediate filename reuse and unexpected collisions; it is *not* a count of currently visible images.
+
+Conversion is best effort. PNG / JPEG / AVIF (and the other decoder-supported static formats) can be converted to WebP; GIF, existing WebP, and SVG are left untouched; failed conversions preserve original data. **Previously damaged WebP files cannot be repaired by updating the plugin.** Recover original images from backups and redo the conversion.
+
+Automated test/build/publishing checks cannot replace a manual Obsidian 1.14.4 smoke test; this is a prerelease.

@@ -21,6 +21,10 @@ jobs:
       - run: node --test tests/*.test.cjs
       - run: npm run build
       - run: node --check obsidian_local_images_plus_latest/main.js
+      - name: Assert independent fork identity
+        run: |
+          test "$(node -p 'require("./manifest.json").id')" = 'obsidian-local-images-plus-tac'
+          cmp manifest.json obsidian_local_images_plus_latest/manifest.json
       - name: Package Obsidian installation files
         run: |
           test -s obsidian_local_images_plus_latest/main.js
@@ -31,8 +35,8 @@ jobs:
       - name: Publish fork-specific prerelease
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: 0.17.0-counter-webp.2
-          name: Local Images Plus 0.17.0 + counter & multi-format WebP (fork)
+          tag_name: 0.17.0-counter-webp.3
+          name: Local Images Plus Mod 0.17.0 — full-image conversion fix (.3)
           target_commitish: ${{ github.sha }}
           prerelease: true
           make_latest: false
@@ -40,6 +44,8 @@ jobs:
             Fork-specific prerelease based on upstream 0.17.0.
             Adds per-note ${counter} / ${counter:001} / ${counter:0001} numbering
             and best-effort WebP conversion for browser-decodable static images.
+            Fix: process complete source bytes, not the 5,000-byte hash prefix.
+            Plugin ID: obsidian-local-images-plus-tac (independent from upstream).
             GIF remains unchanged. Conversion errors retain original bytes.
             This prerelease has passed automated checks but still requires
             manual Obsidian smoke testing. Back up your vault before bulk runs.

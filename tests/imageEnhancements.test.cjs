@@ -49,3 +49,21 @@ test("decode/encoder failure falls back to untouched original",async()=>{
   try {assert.equal(await h.convertImageToWebp(new ArrayBuffer(16),"avif"),null);}
   finally{global.URL=oldURL;global.Image=oldImage;global.Blob=oldBlob;}
 });
+
+test("regression: pasted images are converted from complete binary, not signature prefix",()=>{
+  const mainSrc = fs.readFileSync("src/main.ts", "utf8");
+  // Upstream still reads the first 5,000 bytes to identify attachment types.
+  assert.match(mainSrc, /const oldBinData = await readFromDiskB\(\s*pathJoin\(\[this\.app\.vault\.adapter\.basePath,\s*oldpath\]\),\s*5000\s*\)/);
+  assert.match(mainSrc, /const fullImageData = await this\.app\.vault\.adapter\.readBinary\(oldpath\)/);
+  assert.match(mainSrc, /newBinData = await convertImageToWebp\(\s*fullImageData\s*,/);
+  assert.doesNotMatch(mainSrc, /convertImageToWebp\(\s*oldBinData\s*,/);
+  // Existing WebP and GIF must never enter conversion.
+  assert.match(mainSrc, /if \(isWebpConvertible\(fileExt, this\.settings\.skipWebPConversionFormats\)\)/);
+});
+test("manifest identity isolates this fork from original plugin",()=>{
+  const root = JSON.parse(fs.readFileSync("manifest.json","utf8"));
+  const build = JSON.parse(fs.readFileSync("obsidian_local_images_plus_latest/manifest.json","utf8"));
+  assert.equal(root.id,"obsidian-local-images-plus-tac");
+  assert.equal(root.name,"Local Images Plus Mod");
+  assert.deepEqual(root,build);
+});
