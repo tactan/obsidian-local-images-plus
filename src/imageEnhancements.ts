@@ -5,6 +5,10 @@
 const counters = new Map<string, number>();
 const TOKEN = /\$\{(\w+)(?::(\d+))?\}/g;
 
+export function formatCounter(counter: string, widthPattern?: string): string {
+  return widthPattern ? counter.padStart(widthPattern.length, "0") : counter;
+}
+
 export function hasCounterVariable(template: string): boolean {
   return /\$\{counter(?::\d+)?\}/.test(template);
 }
