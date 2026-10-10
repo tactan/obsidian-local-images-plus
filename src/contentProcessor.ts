@@ -36,6 +36,7 @@ import {
 
 import AsyncLock from "async-lock";
 import moment from "moment";
+import { convertImageToWebp, nextCounterForNote, hasCounterVariable } from "./imageEnhancements";
 
 export function imageTagProcessor(
   app: Plugin,
@@ -152,7 +153,10 @@ export function imageTagProcessor(
 
             let fileExt = await getFileExt(fileData, parsedUrl.pathname);
 
-            if (fileExt == "png" && settings.PngToJpeg) {
+            if (settings.PngToJpeg && settings.ImgCompressionType === "image/webp") {
+              const converted = await convertImageToWebp(fileData, fileExt, settings.JpegQuality, settings.skipWebPConversionFormats);
+              if (converted) { fileData = converted; fileExt = "webp"; }
+            } else if (fileExt == "png" && settings.PngToJpeg) {
               fileData = await blobToJpegArrayBuffer(
                 fileData,
                 settings.JpegQuality * 0.01,
@@ -169,6 +173,7 @@ export function imageTagProcessor(
               settings,
               {
                 notename: noteFile.basename,
+                notepath: noteFile.path,
                 date: moment().format(settings.DateFormat),
               }
             );
@@ -387,6 +392,10 @@ async function chooseFileName(
     unique: Math.random().toString(16).slice(2),
   };
 
+  if (hasCounterVariable(settings.FileNameTemplate)) {
+    const found = await adapter.exists(dir, false) ? (await adapter.list(dir)).files : [];
+    nameCtx.counter = String(nextCounterForNote(ctx.notepath || ctx.notename || dir, settings.FileNameTemplate, ctx.notename || "", found));
+  }
   const baseName = renderNameTemplate(
     settings.FileNameTemplate,
     nameCtx,
