@@ -1,0 +1,50 @@
+name: Publish counter + WebP fork prerelease
+
+on:
+  push:
+    branches:
+      - feature/counter-multiformat-webp
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - run: node --test tests/*.test.cjs
+      - run: npm run build
+      - run: node --check obsidian_local_images_plus_latest/main.js
+      - name: Package Obsidian installation files
+        run: |
+          test -s obsidian_local_images_plus_latest/main.js
+          test -s obsidian_local_images_plus_latest/manifest.json
+          test -s obsidian_local_images_plus_latest/styles.css
+          cd obsidian_local_images_plus_latest
+          zip -q -r ../local-images-plus-counter-webp.zip main.js manifest.json styles.css
+      - name: Publish fork-specific prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: 0.17.0-counter-webp.1
+          name: Local Images Plus 0.17.0 + counter & multi-format WebP (fork)
+          target_commitish: ${{ github.sha }}
+          prerelease: true
+          make_latest: false
+          body: |
+            Fork-specific prerelease based on upstream 0.17.0.
+            Adds per-note ${counter} / ${counter:001} / ${counter:0001} numbering
+            and best-effort WebP conversion for browser-decodable static images.
+            GIF remains unchanged. Conversion errors retain original bytes.
+            This prerelease has passed automated checks but still requires
+            manual Obsidian smoke testing. Back up your vault before bulk runs.
+          files: |
+            local-images-plus-counter-webp.zip
+            obsidian_local_images_plus_latest/main.js
+            obsidian_local_images_plus_latest/manifest.json
+            obsidian_local_images_plus_latest/styles.css
