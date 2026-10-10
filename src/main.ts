@@ -57,6 +57,7 @@ import {
 import { UniqueQueue } from "./uniqueQueue";
 import path from "path";
 import moment from "moment";
+import { convertImageToWebp, nextCounterForNote, hasCounterVariable } from "./imageEnhancements";
 import { ModalW1 } from "./modal";
 const fs = require("fs").promises;
 
@@ -1255,7 +1256,14 @@ export default class LocalImagesPlugin extends Plugin {
                 targetExt = "." + fileExt;
               }
 
-              if (this.settings.PngToJpegLocal && fileExt == "png") {
+              if (this.settings.PngToJpegLocal && this.settings.ImgCompressionType === "image/webp") {
+                newBinData = await convertImageToWebp(oldBinData, fileExt, this.settings.JpegQuality, this.settings.skipWebPConversionFormats);
+                if (newBinData) {
+                  contentHash = md5Sig(newBinData);
+                  targetExt = ".webp";
+                  readExisting = (filePath) => this.app.vault.adapter.readBinary(filePath);
+                }
+              } else if (this.settings.PngToJpegLocal && fileExt == "png") {
                 const compExt =
                   this.settings.ImgCompressionType == "image/webp"
                     ? ".webp"
@@ -1282,9 +1290,14 @@ export default class LocalImagesPlugin extends Plugin {
                 md5: contentHash,
                 originalname: path.parse(el.link)?.name ?? "",
                 notename: note.basename,
+                notepath: note.path,
                 date: moment().format(this.settings.DateFormat),
                 unique: Math.random().toString(16).slice(2),
               };
+              if (hasCounterVariable(this.settings.FileNameTemplate)) {
+                const found = await this.app.vault.adapter.exists(mdir, false) ? (await this.app.vault.adapter.list(mdir)).files : [];
+                nameCtx.counter = String(nextCounterForNote(note.path, this.settings.FileNameTemplate, note.basename, found));
+              }
               const baseName = renderNameTemplate(
                 this.settings.FileNameTemplate,
                 nameCtx,
@@ -1460,6 +1473,24 @@ export default class LocalImagesPlugin extends Plugin {
   async loadSettings() {
     const data = await this.loadData();
     this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
+    // Upgrade user settings from the earlier fork without altering explicit current settings.
+    if (data && typeof data.FileNameTemplate !== "string" && typeof data.imageRenameRule === "string") {
+      this.settings.FileNameTemplate = data.imageRenameRule
+        .replace(/\{notename\}/g, "${notename}")
+        .replace(/\{counter(?::(\d+))?\}/g, (_: string, width?: string) => "${counter" + (width ? ":" + width : "") + "}");
+    }
+    if (data && typeof data.convertWebpForWebImages === "boolean" && typeof data.ImgCompressionType !== "string") {
+      this.settings.PngToJpeg = data.convertWebpForWebImages;
+    }
+    if (data && typeof data.convertWebpForPastedImages === "boolean" && typeof data.ImgCompressionType !== "string") {
+      this.settings.PngToJpegLocal = data.convertWebpForPastedImages;
+    }
+    if (data && (data.convertWebpForWebImages || data.convertWebpForPastedImages) && typeof data.ImgCompressionType !== "string") {
+      this.settings.ImgCompressionType = "image/webp";
+    }
+    if (data && typeof data.webpQuality === "number" && typeof data.ImgCompressionType !== "string") {
+      this.settings.JpegQuality = data.webpQuality;
+    }
     if (
       data &&
       typeof data.FileNameTemplate !== "string" &&
