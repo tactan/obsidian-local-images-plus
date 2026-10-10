@@ -1,0 +1,32 @@
+name: Fork feature validation
+
+on:
+  push:
+    branches:
+      - feature/counter-multiformat-webp
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - run: node --test tests/*.test.cjs
+      - run: npm run build
+      - run: test -s obsidian_local_images_plus_latest/main.js
+      - run: node --check obsidian_local_images_plus_latest/main.js
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fork-counter-webp-build
+          path: |
+            obsidian_local_images_plus_latest/main.js
+            obsidian_local_images_plus_latest/manifest.json
+            obsidian_local_images_plus_latest/styles.css
