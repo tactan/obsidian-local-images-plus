@@ -120,6 +120,7 @@ export interface ISettings {
   DoNotCreateObsFolder: boolean;
   DateFormat: string;
   ImgCompressionType:string;
+  skipWebPConversionFormats: string;
   ExcludedFoldersList:string;
   ExcludedFoldersListRegexp: string;
   useMarkdownLinkFormat: boolean;
@@ -155,6 +156,7 @@ export const DEFAULT_SETTINGS: ISettings = {
   DoNotCreateObsFolder: false,
   DateFormat: "YYYY MM DD",
   ImgCompressionType: "image/jpeg",
+  skipWebPConversionFormats: "gif",
   ExcludedFoldersList: "",
   ExcludedFoldersListRegexp: "",
   useMarkdownLinkFormat: false,
