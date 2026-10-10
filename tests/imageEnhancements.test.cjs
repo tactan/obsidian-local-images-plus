@@ -8,6 +8,11 @@ const m={exports:{}};
 new Function("module","exports",js)(m,m.exports);
 const h=m.exports;
 test("counter token recognition and width",()=>{
+  assert.equal(h.formatCounter("1"),"1");
+  assert.equal(h.formatCounter("2","001"),"002");
+  assert.equal(h.formatCounter("3","0001"),"0003");
+  assert.equal(h.formatCounter("108","001"),"108");
+  assert.equal(h.formatCounter("1008","001"),"1008");
   assert.equal(h.hasCounterVariable("\${notename}-\${counter:001}"),true);
   assert.equal(h.hasCounterVariable("\${notename}-\${md5:8}"),false);
   assert.equal(h.hasCounterVariable("{counter:001}"),false);
