@@ -219,7 +219,7 @@ export default class SettingTab extends PluginSettingTab {
       .setName(translate("File name template"))
       .setDesc(
         translate(
-          "Template for new attachment names. Variables: ${md5}, ${md5:N}, ${originalname}, ${notename}, ${date}, ${unique}. Default: ${md5}_MD5 (backward compatible). Examples: ${originalname}, ${notename}-${originalname}, ${date}-${md5:8}. Use 'Folder to save new attachments' for subfolders."
+          "Template for new attachment names. Variables: ${md5}, ${md5:N}, ${originalname}, ${notename}, ${date}, ${unique}, ${counter}, ${counter:001} (zero-padded), ${counter:0001}. Default: ${md5}_MD5 (backward compatible). Examples: ${originalname}, ${notename}-${originalname}, ${date}-${md5:8}. Use 'Folder to save new attachments' for subfolders."
         )
       )
       .addText((text) =>
@@ -357,6 +357,17 @@ export default class SettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           });
       });
+
+    new Setting(containerEl)
+      .setName("Skip WebP conversion for formats")
+      .setDesc("Extensions separated by | (e.g. gif|svg). GIF is always preserved, including animation.")
+      .addText((text) => text
+        .setValue(this.plugin.settings.skipWebPConversionFormats || "gif")
+        .onChange(async (value) => {
+          this.plugin.settings.skipWebPConversionFormats = value;
+          await this.plugin.saveSettings();
+        })
+      );
 
     new Setting(containerEl)
       .setName(translate("Excluded folders"))
