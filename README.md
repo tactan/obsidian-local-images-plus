@@ -142,3 +142,16 @@ Share your  wishes and ideas about this software or buy me a coffee (or hot choc
 npm run build
 npm run dev
 ```
+
+
+## Fork-only: sequential image numbering and static-image WebP conversion
+
+The maintained fork branch `feature/counter-multiformat-webp` builds on the upstream 0.17.0 code without merging the old `feature/add-webpconvert-rename` branch.
+
+- **File name template:** `${notename}-${counter}` gives `My Note-1`, `My Note-2`; `${notename}-${counter:001}` gives `001`, `002`; `${counter:0001}` gives `0001`, `0002`. The width is the number of digits in the format. Only the new `${...}` syntax is supported.
+- **Counter scope:** one sequence per note path and template; the first use in a session scans existing filenames in the destination directory to continue after the highest matching counter. Parallel remote downloads can finish out of note order; unsuccessful downloads may consume numbers.
+- **Compression:** when image compression is enabled with type WebP, static PNG, JPEG, AVIF, BMP, TIFF, or ICO images that the Obsidian desktop browser decoder supports are converted to WebP. GIF, animated GIF, SVG, existing WebP, and non-image attachments are never converted. Failures keep the original bytes and extension. AVIF decoding is platform dependent.
+- **Compatibility:** existing upstream naming and JPEG mode are unchanged unless the new template or WebP conversion is enabled. When loading an old fork `data.json` without `FileNameTemplate` or `ImgCompressionType`, previous `imageRenameRule`, `convertWebpForWebImages`, `convertWebpForPastedImages` and `webpQuality` settings are migrated in memory.
+- **Safety:** back up the vault and plugin `data.json` before enabling bulk note processing. Do not run both the old fork and this fork under different plugin directories; both have the same plugin ID.
+- **Tests:** `npm ci && node --test tests/*.test.cjs && npm run build`. The build uses the existing Rollup pipeline.
+
