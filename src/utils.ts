@@ -4,6 +4,7 @@ import isSvg from "is-svg";
 import md5 from "crypto-js/md5";
 const fs2 = require("fs").promises;
 import fs from "fs";
+import { formatCounter } from "./imageEnhancements";
 
 import {
   USER_AGENT,
@@ -419,7 +420,7 @@ export function renderNameTemplate(
         return match;
       }
       if (name === "counter" && lenStr !== undefined) {
-        return value.padStart(lenStr.length, "0");
+        return formatCounter(value, lenStr);
       }
       if (lenStr !== undefined) {
         const len = parseInt(lenStr, 10);
